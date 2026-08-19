@@ -839,6 +839,9 @@ bin/repo release --package my-package
 - Same workflow, just add `--arch aarch64`; the scheduled pipeline runs it
   automatically once `aarch64` is in `PUBLISHED_ARCHES`
 - Packages whose `arch=()` lacks `aarch64` are skipped, not failed
+- Or build natively in CI: the **Build aarch64 Packages** workflow runs on GitHub's
+  ARM64 runners, which need no emulation. Trigger it from the Actions tab; it uploads
+  the packages as an artifact and leaves signing and publishing to a maintainer.
 
 ### Building for Both Architectures
 
