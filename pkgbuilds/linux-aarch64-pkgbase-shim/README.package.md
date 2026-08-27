@@ -21,7 +21,7 @@ does not touch `usr/lib/initcpio/`), the script runs
 that hold nothing but these two files are cleaned up.
 
 `limine-mkinitcpio-hook` needs its carried
-`0002-accept-pkgbase-in-package-owned-kernel-dir.patch` to accept a `pkgbase`
+`accept-shim-pkgbase.patch` to accept a `pkgbase`
 that no package owns.
 
 ## Retirement

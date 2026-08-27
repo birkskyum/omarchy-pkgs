@@ -1,0 +1,28 @@
+Accept a shim-written pkgbase in a package-owned kernel directory
+
+Arch Linux ARM installs its kernel as /boot/Image. Omarchy's
+linux-aarch64-pkgbase-shim copies that image into the module directory and
+writes the pkgbase marker that mkinitcpio and Limine expect, but the marker is
+not itself owned by the kernel package. Accept it when the surrounding kernel
+directory is package-owned. This is the ownership half of Jimmy Van Veen's
+original Snapdragon patch, adapted to follow the kernel discovery change
+merged in Zesko/limine-entry-tool!64.
+
+Retire with linux-aarch64-pkgbase-shim when Arch Linux ARM ships both pkgbase
+and vmlinuz in its kernel module directory.
+
+--- a/install/arch-linux/limine-mkinitcpio-hook/usr/share/libalpm/scripts/limine-mkinitcpio-install
++++ b/install/arch-linux/limine-mkinitcpio-hook/usr/share/libalpm/scripts/limine-mkinitcpio-install
+@@ -247,8 +247,10 @@ process_kernel() {
+ 	local pkgbase_file="$1"
+ 
+ 	if [[ -f "$pkgbase_file" ]]; then
+-		# Skip if pkgbase file is not owned by any package
+-		pacman -Qqo "$pkgbase_file" &>/dev/null || return 0
++		# The ALARM shim writes this marker, so accept it when either the
++		# marker itself or its package-owned kernel directory is owned.
++		pacman -Qqo "$pkgbase_file" &>/dev/null ||
++			pacman -Qqo "${pkgbase_file%/pkgbase}" &>/dev/null || return 0
+ 		set_kernel_context "$pkgbase_file" || return 0
+ 	else
+ 		# No marker: recover the kernel name from the package owning the module
