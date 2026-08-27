@@ -10,16 +10,13 @@
 #    provenance only (empty when cut from a bare commit). omarchy and
 #    omarchy-settings must always carry identical _tag/_commit/pkgver/sha256sums.
 pkgname='omarchy-settings'
-# Snapdragon: built from JimmayVV/omarchy@snapdragon, which is upstream PR
-# basecamp/omarchy#8039 (aarch64 runtime guards) plus the install/hardware/
-# qualcomm layer, until both are merged upstream. pkgrel .1 marks the
-# omarchy-side deviation, as .omarchy/patches do for AUR packages; retire by
-# pointing source back at basecamp/omarchy and dropping the suffix.
+# Integration-only build pin: Jimmy's generic Snapdragon work plus the Yoga
+# Slim 7x follow-up. This branch exists solely to build the encrypted-install
+# test ISO; upstream package PRs must not carry this fork pin.
 _tag=''
-# 1.4 = snapdragon-diag (qcom-firmware-extract + DSPs off on USB root + visible boot console) for the G1q install debugging.
-_commit='2e4b715844826a8daf6c3355084f569d678a0976'
+_commit='755c42deae19b83479ab8b310b56c8b528adfac8'
 pkgver=4.0.1rc3
-pkgrel=1.4
+pkgrel=1.5
 pkgdesc='Omarchy user defaults, /etc/skel content, fonts, plymouth theme, and support helpers'
 arch=('any')
 url='https://github.com/basecamp/omarchy'
@@ -114,8 +111,8 @@ if [[ -n "${OMARCHY_SRC:-}" ]]; then
   source=()
   sha256sums=()
 else
-  source=("omarchy::git+https://github.com/JimmayVV/omarchy.git#commit=${_commit}")
-  sha256sums=('43a0be2c035ba93c6ad45e01cb26d957b1907d3fc0a17c9fb3807c991a3c5fac')
+  source=("omarchy::git+https://github.com/birkskyum/omarchy.git#commit=${_commit}")
+  sha256sums=('SKIP')
 fi
 
 prepare() {
