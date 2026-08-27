@@ -1,0 +1,40 @@
+diff --git a/install/arch-linux/limine-mkinitcpio-hook/usr/share/libalpm/scripts/limine-mkinitcpio-install b/install/arch-linux/limine-mkinitcpio-hook/usr/share/libalpm/scripts/limine-mkinitcpio-install
+index 5e36a73..c9b2ea3 100755
+--- a/install/arch-linux/limine-mkinitcpio-hook/usr/share/libalpm/scripts/limine-mkinitcpio-install
++++ b/install/arch-linux/limine-mkinitcpio-hook/usr/share/libalpm/scripts/limine-mkinitcpio-install
+@@ -73 +73,8 @@ collect_pkgbase_files() {
+-		PKGBASE_FILES=(/usr/lib/modules/*/pkgbase)
++		# Enumerate module directories rather than pkgbase files: a kernel whose
++		# package omits the marker still has a module directory. process_kernel()
++		# decides whether each one is usable.
++		PKGBASE_FILES=()
++		local _moddir
++		for _moddir in /usr/lib/modules/*/; do
++			PKGBASE_FILES+=("${_moddir}pkgbase")
++		done
+@@ -79,3 +86,3 @@ set_kernel_context() {
+-	local pkgbase_file="$1"
+-	# Read kernel name from pkgbase file
+-	KERNEL_NAME="$(<"$pkgbase_file")"
++	local pkgbase_file="$1" kernel_name="${2:-}"
++	# Read kernel name from pkgbase file, unless the caller already knows it
++	KERNEL_NAME="${kernel_name:-$(<"$pkgbase_file")}"
+@@ -242,4 +249,14 @@ process_kernel() {
+-	[[ -f "$pkgbase_file" ]] || return 0
+-	# Skip if pkgbase file is not owned by any package
+-	pacman -Qqo "$pkgbase_file" &>/dev/null || return 0
+-	set_kernel_context "$pkgbase_file" || return 0
++	if [[ -f "$pkgbase_file" ]]; then
++		# Skip if pkgbase file is not owned by any package
++		pacman -Qqo "$pkgbase_file" &>/dev/null || return 0
++		set_kernel_context "$pkgbase_file" || return 0
++	else
++		# No marker: recover the kernel name from the package owning the module
++		# tree. Query a file inside the directory rather than the directory
++		# itself, whose entry may belong to a different package.
++		local kernel_dir="${pkgbase_file%/pkgbase}" owner=""
++		[[ -f "${kernel_dir}/modules.builtin" ]] || return 0
++		owner="$(pacman -Qqo "${kernel_dir}/modules.builtin" 2>/dev/null)" || return 0
++		[[ -n "$owner" ]] || return 0
++		set_kernel_context "$pkgbase_file" "$owner" || return 0
++	fi

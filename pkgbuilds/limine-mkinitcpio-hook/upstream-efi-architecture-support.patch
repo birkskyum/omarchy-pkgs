@@ -1,0 +1,87 @@
+diff --git a/install/arch-linux/limine-entry-tool/usr/bin/limine-install b/install/arch-linux/limine-entry-tool/usr/bin/limine-install
+index f9491f8..d2a36d8 100755
+--- a/install/arch-linux/limine-entry-tool/usr/bin/limine-install
++++ b/install/arch-linux/limine-entry-tool/usr/bin/limine-install
+@@ -71,2 +71,2 @@ fi
+-is_x64 || {
+-	info_msg "The system is not x86_64."
++is_supported_arch || {
++	info_msg "No Limine EFI binary for $(uname -m)."
+@@ -375 +375 @@ if [[ "${FIND_BOOTLOADERS:-no}" == "yes" && "${SKIP_UEFI:-no}" == "no" ]]; then
+-	bootloader_path="${ESP_PATH}/EFI/systemd/systemd-bootx64.efi"
++	bootloader_path="${ESP_PATH}/EFI/systemd/systemd-boot$(limine_efi_arch | tr "[:upper:]" "[:lower:]").efi"
+@@ -385 +385 @@ if [[ "${FIND_BOOTLOADERS:-no}" == "yes" && "${SKIP_UEFI:-no}" == "no" ]]; then
+-	bootloader_path="${ESP_PATH}/EFI/BOOT/BOOTX64.EFI"
++	bootloader_path="${ESP_PATH}/EFI/BOOT/BOOT$(limine_efi_arch).EFI"
+diff --git a/install/arch-linux/limine-entry-tool/usr/lib/limine/limine-common-functions b/install/arch-linux/limine-entry-tool/usr/lib/limine/limine-common-functions
+index b56cc30..1db04b9 100644
+--- a/install/arch-linux/limine-entry-tool/usr/lib/limine/limine-common-functions
++++ b/install/arch-linux/limine-entry-tool/usr/lib/limine/limine-common-functions
+@@ -58,0 +59,17 @@ is_x64() {
++# Limine ships BOOTX64/BOOTIA32/BOOTAA64/BOOTRISCV64/BOOTLOONGARCH64; this tool
++# only ever used the x64 one. Map the machine to the binary it actually has.
++limine_efi_arch() {
++	case "$(uname -m)" in
++		x86_64)      echo "X64"        ;;
++		i?86)        echo "IA32"       ;;
++		aarch64)     echo "AA64"       ;;
++		riscv64)     echo "RISCV64"    ;;
++		loongarch64) echo "LOONGARCH64";;
++		*)           return 1          ;;
++	esac
++}
++
++is_supported_arch() {
++	limine_efi_arch >/dev/null 2>&1
++}
++
+@@ -330 +347 @@ reset_enroll_config() {
+-	is_x64 || return 0
++	is_supported_arch || return 0
+@@ -345 +362 @@ enroll_config() {
+-	is_x64 || return 0
++	is_supported_arch || return 0
+@@ -388 +405 @@ initialize_header() {
+-		export BINARY_SOURCE_PATH="/usr/share/limine/BOOTX64.EFI"
++		export BINARY_SOURCE_PATH="/usr/share/limine/BOOT$(limine_efi_arch).EFI"
+@@ -392,2 +409,3 @@ initialize_header() {
+-	export LIMINE_EFI_FILE="limine_x64.efi"
+-	export LIMINE_BACKUP_FILE="limine_x64.bak"
++	_limine_arch_lc="$(limine_efi_arch | tr '[:upper:]' '[:lower:]')"
++	export LIMINE_EFI_FILE="limine_${_limine_arch_lc}.efi"
++	export LIMINE_BACKUP_FILE="limine_${_limine_arch_lc}.bak"
+@@ -397 +415 @@ initialize_header() {
+-	export BINARY_FALLBACK_PATH="${ESP_PATH}/EFI/BOOT/BOOTX64.EFI"
++	export BINARY_FALLBACK_PATH="${ESP_PATH}/EFI/BOOT/BOOT$(limine_efi_arch).EFI"
+diff --git a/src/main/java/org/limine/entry/tool/Main.java b/src/main/java/org/limine/entry/tool/Main.java
+index 3898db2..e699492 100644
+--- a/src/main/java/org/limine/entry/tool/Main.java
++++ b/src/main/java/org/limine/entry/tool/Main.java
+@@ -283,2 +283,2 @@ public class Main {
+-        if (!Utility.isSystemAmd64()) {
+-            exitWithError("Your system is not using x86_64 architecture");
++        if (!Utility.isSystemSupportedArch()) {
++            exitWithError("Limine has no UEFI binary for this architecture");
+@@ -314,2 +314,2 @@ public class Main {
+-        if (shouldCheckDevice && !Utility.isSystemAmd64()) {
+-            exitWithError("Your system is not using x86_64 architecture");
++        if (shouldCheckDevice && !Utility.isSystemSupportedArch()) {
++            exitWithError("Limine has no UEFI binary for this architecture");
+diff --git a/src/main/java/org/limine/entry/tool/processes/Utility.java b/src/main/java/org/limine/entry/tool/processes/Utility.java
+index 728e2c7..6e0d715 100644
+--- a/src/main/java/org/limine/entry/tool/processes/Utility.java
++++ b/src/main/java/org/limine/entry/tool/processes/Utility.java
+@@ -572,0 +573,13 @@ public class Utility {
++    /**
++     * Check if Limine ships a UEFI binary for this architecture.
++     * Limine provides BOOTX64/BOOTIA32/BOOTAA64/BOOTRISCV64/BOOTLOONGARCH64,
++     * so gating entry management on x86_64 alone is unnecessarily narrow.
++     */
++    public static boolean isSystemSupportedArch() {
++        String arch = System.getProperty("os.arch").toLowerCase();
++        return arch.equals("x86_64") || arch.equals("amd64")
++                || arch.equals("aarch64") || arch.equals("arm64")
++                || arch.equals("riscv64") || arch.equals("loongarch64");
++    }
++
++

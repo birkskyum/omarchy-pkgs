@@ -113,9 +113,11 @@ ARG MIRROR=edge
 RUN pacman-key --recv-keys 40DFB630FF42BCFFB047046CF0134EE680CAC571 --keyserver keys.openpgp.org && \
     pacman-key --lsign-key 40DFB630FF42BCFFB047046CF0134EE680CAC571 && \
     printf '\n[omarchy]\nSigLevel = Optional\nServer = https://pkgs.omarchy.org/%s/$arch\n' "${MIRROR}" >> /etc/pacman.conf && \
-    pacman -Sy --noconfirm && \
-    pacman -S --noconfirm omarchy-keyring && \
-    pacman-key --populate omarchy && \
+    if [ "${TARGETARCH}" = "amd64" ]; then \
+        pacman -Sy --noconfirm && \
+        pacman -S --noconfirm omarchy-keyring && \
+        pacman-key --populate omarchy; \
+    fi && \
     sed -i '/^\[omarchy\]/,/^$/d' /etc/pacman.conf
 
 RUN pacman -Syu --noconfirm && \
