@@ -51,7 +51,7 @@ jobs:
       ARCH: aarch64
       INPUT_MIRROR: ${{ inputs.mirror }}
       # Integration-only default: exercise the exact package PR contents.
-      INPUT_PACKAGES: ${{ inputs.packages || 'limine-mkinitcpio-hook limine-snapper-sync qcom-firmware-extract' }}
+      INPUT_PACKAGES: ${{ inputs.packages || 'limine-mkinitcpio-hook limine-snapper-sync linux-aarch64-pkgbase-shim qcom-firmware-extract' }}
     steps:
       - name: Checkout omarchy-pkgs
         uses: actions/checkout@v4
