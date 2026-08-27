@@ -8,6 +8,8 @@ name: aarch64 package repo
 # consume the complete repository artifact in the same run.
 
 on:
+  push:
+    branches: [integration/upstream-package-prs]
   workflow_dispatch:
     inputs:
       packages:
@@ -48,7 +50,8 @@ jobs:
     env:
       ARCH: aarch64
       INPUT_MIRROR: ${{ inputs.mirror }}
-      INPUT_PACKAGES: ${{ inputs.packages }}
+      # Integration-only default: exercise the exact package PR contents.
+      INPUT_PACKAGES: ${{ inputs.packages || 'limine-mkinitcpio-hook limine-snapper-sync qcom-firmware-extract' }}
     steps:
       - name: Checkout omarchy-pkgs
         uses: actions/checkout@v4
