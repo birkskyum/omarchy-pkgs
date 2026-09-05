@@ -4,12 +4,12 @@
 
 pkgname=linux-aarch64-pkgbase-shim
 pkgver=1
-pkgrel=2
+pkgrel=3
 pkgdesc="Writes usr/lib/modules/<ver>/{pkgbase,vmlinuz} for Arch Linux ARM kernels so mkinitcpio and Limine hooks find them"
 arch=('aarch64')
-url="https://github.com/omacom-io/omarchy-pkgs"
+url="https://github.com/omacom/omarchy-pkgs"
 license=('MIT')
-depends=('bash' 'pacman')
+depends=('bash' 'diffutils' 'pacman')
 optdepends=('limine-mkinitcpio-hook: rebuild the UKI and Limine entry when the shim is installed after the kernel')
 options=('!debug')
 source=(

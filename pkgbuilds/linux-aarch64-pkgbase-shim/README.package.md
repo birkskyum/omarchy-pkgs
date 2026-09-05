@@ -6,10 +6,13 @@ Arch Linux ARM installs its kernel as `/boot/Image` instead of
 
 This package is one pacman hook. After a kernel package is installed or
 upgraded (`usr/lib/modules/*/`), and when the shim itself is installed, it
-writes into every package-owned modules directory that lacks `pkgbase`:
+writes into each package-owned modules directory without native kernel metadata:
 
 - `pkgbase`: compatibility metadata naming the package that owns the directory
 - `vmlinuz`: a copy of `/boot/Image` (the owner must own that too)
+
+Reinstalling a kernel refreshes the shim's copy when the image changes, even
+if the module-directory version is unchanged. Package-owned files are preserved.
 
 It runs as `85-`, before `90-mkinitcpio-install`, so the usual hook then builds
 the initramfs/UKI and the Limine entry. If that hook would not run in the same
@@ -21,5 +24,5 @@ that hold nothing but these two files are cleaned up.
 ## Retirement
 
 Delete this package when `linux-aarch64` ships `vmlinuz` in its kernel module
-directory. Existing metadata is never modified, so both approaches can coexist
+directory. Package-owned metadata is never modified, so both approaches can coexist
 during the transition.
