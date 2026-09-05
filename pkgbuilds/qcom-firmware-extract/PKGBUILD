@@ -1,16 +1,15 @@
 # Maintainer: Jimmy Van Veen
 
 # Copy vendor-signed Qualcomm firmware named by the running device tree.
-# The tool exits without changes on machines that do not need it.
 
 pkgname=qcom-firmware-extract
 pkgver=1
-pkgrel=2
+pkgrel=3
 pkgdesc="Copy vendor-signed Qualcomm Snapdragon firmware from the machine's Windows installation"
 arch=('any')
-url="https://github.com/omacom-io/omarchy-pkgs"
+url="https://github.com/omacom/omarchy-pkgs"
 license=('GPL-2.0-or-later')
-depends=('bash' 'coreutils' 'findutils' 'gzip' 'util-linux' 'xz' 'zstd')
+depends=('bash' 'coreutils' 'diffutils' 'findutils' 'gzip' 'util-linux' 'xz' 'zstd')
 optdepends=('limine-mkinitcpio-hook: rebuild the boot image after installing firmware')
 options=('!debug')
 source=(

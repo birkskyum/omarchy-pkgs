@@ -75,8 +75,8 @@ dt_firmware_names() {
   [[ -d $DT_ROOT ]] || return 0
   find "$DT_ROOT" -name firmware-name -type f -print0 2>/dev/null | sort -z |
     while IFS= read -r -d '' prop; do
-      node=$(basename "$(dirname "$prop")")
-      node=${node%%@*}
+      node=${prop%/firmware-name}
+      node=${node#"$DT_ROOT"/}
       tr '\0' '\n' <"$prop" | while IFS= read -r name; do
         [[ -n $name ]] && printf '%s %s\n' "$node" "$name"
       done
@@ -111,7 +111,7 @@ if [[ ! -d $DT_ROOT ]]; then
   log "no device tree on this machine, nothing to do"
   exit 0
 fi
-if ((${#missing_names[@]} == 0)); then
+if [[ $mode != install ]] && ((${#missing_names[@]} == 0)); then
   log "every firmware file the device tree names is already installed"
   exit 0
 fi
@@ -203,67 +203,64 @@ matching_companion_candidate() {
   local node=$1
   shift
   local -a candidates=("$@")
-  local dt_node dt_name installed installed_hash candidate sibling
-  local companion_seen=0
+  local dt_node dt_name installed installed_hash candidate sibling matched compatible
+  local -a matches=()
 
-  while read -r dt_node dt_name; do
-    [[ $dt_node == "$node" ]] || continue
-    installed=$(firmware_file "$dt_name") || continue
-    companion_seen=1
-    installed_hash=$(firmware_sha256 "$installed")
-
-    for candidate in "${candidates[@]}"; do
+  for candidate in "${candidates[@]}"; do
+    matched=0
+    compatible=1
+    while read -r dt_node dt_name; do
+      [[ $dt_node == "$node" ]] || continue
+      installed=$(firmware_file "$dt_name") || continue
+      installed_hash=$(firmware_sha256 "$installed") || return 1
       sibling=$(find "${candidate%/*}" -maxdepth 1 -type f \
         -iname "$(basename "$dt_name")" -print -quit 2>/dev/null)
       [[ -n $sibling ]] || continue
       if [[ $(sha256sum "$sibling" | cut -d' ' -f1) == "$installed_hash" ]]; then
-        printf '%s\n' "$candidate"
-        return 0
+        matched=1
+      else
+        compatible=0
+        break
       fi
-    done
-  done < <(dt_firmware_names)
+    done < <(dt_firmware_names)
+    if ((matched && compatible)); then
+      matches+=("$candidate")
+    fi
+  done
 
-  ((companion_seen)) && return 1
-  return 2
+  unique_candidate "${matches[@]}"
+}
+
+# Duplicate copies are safe only when their contents agree.
+unique_candidate() {
+  (($#)) || return 1
+  local first=$1 candidate
+  shift
+  for candidate in "$@"; do
+    cmp -s "$first" "$candidate" || return 1
+  done
+  printf '%s\n' "$first"
 }
 
 # Require a companion match when several firmware variants exist.
 find_in_sources() {
-  local base=$1 node=$2 selected result candidate newest newest_mtime mtime
+  local base=$1 node=$2 candidate
   local -a candidates=()
   while IFS= read -r -d '' candidate; do
     candidates+=("$candidate")
   done < <(find "${sources[@]}" -type f -iname "$base" -print0 2>/dev/null)
 
   ((${#candidates[@]})) || return 1
-  if ((${#candidates[@]} == 1)); then
-    printf '%s\n' "${candidates[0]}"
+  if unique_candidate "${candidates[@]}"; then
     return 0
   fi
 
-  if selected=$(matching_companion_candidate "$node" "${candidates[@]}"); then
-    printf '%s\n' "$selected"
+  if matching_companion_candidate "$node" "${candidates[@]}"; then
     return 0
-  else
-    result=$?
   fi
 
-  if ((result == 1)); then
-    warn "refusing ambiguous $base: no variant matches its installed companion firmware"
-    return 1
-  fi
-
-  # With no installed companion, fall back to the newest copy.
-  newest=${candidates[0]}
-  newest_mtime=$(stat -c %Y "$newest" 2>/dev/null || stat -f %m "$newest")
-  for candidate in "${candidates[@]:1}"; do
-    mtime=$(stat -c %Y "$candidate" 2>/dev/null || stat -f %m "$candidate")
-    if ((mtime > newest_mtime)); then
-      newest=$candidate
-      newest_mtime=$mtime
-    fi
-  done
-  printf '%s\n' "$newest"
+  warn "refusing ambiguous $base: no unique variant matches its installed companion firmware"
+  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -283,7 +280,9 @@ if [[ $mode == stage ]]; then
     node=${missing_nodes[$i]}
     name=${missing_names[$i]}
     src=""
-    ((${#sources[@]})) && src=$(find_in_sources "$(basename "$name")" "$node")
+    if ((${#sources[@]})); then
+      src=$(find_in_sources "$(basename "$name")" "$node") || true
+    fi
     if [[ -z $src ]]; then
       warn "not found in the driver store: $name"
       continue
@@ -307,7 +306,7 @@ if [[ -n $driverstore ]]; then
 elif [[ -f "$stage_dir/manifest" ]]; then
   log "using the firmware staged by the installer in $stage_dir"
   sources=("$stage_dir")
-else
+elif ((${#missing_names[@]})); then
   scan_windows_partitions
 fi
 
@@ -318,7 +317,9 @@ for i in "${!missing_names[@]}"; do
   node=${missing_nodes[$i]}
   name=${missing_names[$i]}
   src=""
-  ((${#sources[@]})) && src=$(find_in_sources "$(basename "$name")" "$node")
+  if ((${#sources[@]})); then
+    src=$(find_in_sources "$(basename "$name")" "$node") || true
+  fi
   if [[ -z $src ]]; then
     warn "not found: $name"
     continue
@@ -336,7 +337,7 @@ done
 # Include existing GPU zap shaders in the initramfs for the early DRM driver.
 declare -a initramfs_files=()
 while read -r node name; do
-  [[ $node == zap-shader ]] || continue
+  [[ ${node##*/} == zap-shader || ${node##*/} == zap-shader@* ]] || continue
   for dir in "$FW_ROOT/updates" "$FW_ROOT"; do
     for ext in '' .zst .xz .gz; do
       if [[ -f "$dir/$name$ext" ]]; then
@@ -346,26 +347,33 @@ while read -r node name; do
     done
   done
 done < <(dt_firmware_names)
+initramfs_changed=0
 if ((${#initramfs_files[@]})); then
-  mkdir -p "$(dirname "$INITCPIO_CONF")"
-  {
+  initramfs_config=$(
     echo "# Generated by qcom-firmware-extract for early DRM firmware loading."
     printf 'FILES+=(%s)\n' "$(printf '%q ' "${initramfs_files[@]}" | sed 's/ $//')"
-  } >"$INITCPIO_CONF"
-else
+  )
+  if [[ ! -f $INITCPIO_CONF || $(<"$INITCPIO_CONF") != "$initramfs_config" ]]; then
+    mkdir -p "$(dirname "$INITCPIO_CONF")"
+    printf '%s\n' "$initramfs_config" >"$INITCPIO_CONF"
+    initramfs_changed=1
+  fi
+elif [[ -f $INITCPIO_CONF ]]; then
   rm -f "$INITCPIO_CONF"
+  initramfs_changed=1
 fi
 
 still_missing=$(( ${#missing_names[@]} - installed ))
 if ((installed == 0)); then
-  if ((${#sources[@]} == 0)); then
+  if ((still_missing > 0 && ${#sources[@]} == 0)); then
     warn "no Windows installation found to copy from; run again with -d <driver store> when one is available"
   fi
   log "nothing installed; $still_missing firmware file(s) still missing"
-  exit 0
+  ((initramfs_changed)) || exit 0
+else
+  log "installed $installed firmware file(s), $still_missing still missing"
 fi
 
-log "installed $installed firmware file(s), $still_missing still missing"
 if [[ $rebuild == yes ]]; then
   if command -v limine-update >/dev/null 2>&1; then
     limine-update

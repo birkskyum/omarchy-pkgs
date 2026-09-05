@@ -17,7 +17,8 @@ The device tree names every firmware file the kernel will ask for
 `Windows/System32/DriverStore/FileRepository` on any NTFS partition it can
 mount read-only. If Windows carries several variants and linux-firmware has a
 companion image from the same device-tree node, the sibling image's hash
-selects the compatible variant; otherwise the newest copy wins. The result is
+selects the compatible variant. Identical duplicates are accepted; differing
+variants without a unique companion match are skipped. The result is
 installed under `/usr/lib/firmware/updates/<name>`. The GPU zap shader is added to the
 initramfs through `/etc/mkinitcpio.conf.d/qcom-firmware.conf`; the DSP images
 are loaded from the root filesystem. What was installed, from where, and its
@@ -46,8 +47,8 @@ BitLocker volumes cannot be read; turn BitLocker off in Windows first.
 
 ## Retirement
 
-When linux-firmware ships a machine's vendor directory the tool finds nothing
-missing and does nothing. When every supported machine is covered, drop the
+When linux-firmware ships a machine's vendor directory the tool copies nothing
+and still configures its GPU firmware for early display. When every supported machine is covered, drop the
 package and prune the `/usr/lib/firmware/updates` entries listed in the
 manifest.
 

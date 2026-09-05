@@ -48,3 +48,61 @@ QCOM_FW_DT_ROOT="$dt_root" \
 }
 
 echo "ok - extractor selects an ambiguous DTB by its companion firmware hash"
+
+run_extractor() {
+  QCOM_FW_DT_ROOT="$dt_root" \
+    QCOM_FW_FIRMWARE_ROOT="$firmware_root" \
+    QCOM_FW_ROOT="$scratch/root" \
+    PATH="$test_bin:$PATH" \
+    bash "$extractor" "$@"
+}
+
+# A different remote processor must not supply the matching companion.
+mkdir -p "$dt_root/remoteproc@1" "$driver_store/unrelated"
+printf '%s\0' "$firmware_path/qcadsp8380.mbn" >"$dt_root/remoteproc@1/firmware-name"
+printf 'installed-adsp' >"$firmware_root/$firmware_path/qcadsp8380.mbn"
+printf 'installed-adsp' >"$driver_store/unrelated/qcadsp8380.mbn"
+printf 'unrelated-dtb' >"$driver_store/unrelated/cdsp_dtbs.elf"
+printf 'missing-cdsp' >"$firmware_root/$firmware_path/qccdsp8380.mbn"
+run_extractor --stage "$scratch/unmatched" -d "$driver_store"
+[[ ! -e $scratch/unmatched/$firmware_path/cdsp_dtbs.elf ]]
+echo "ok - companion matching stays within the exact device-tree node"
+
+# Firmware not found in Windows must not stop other files from being staged.
+printf '%s\0%s\0%s\0' "$firmware_path/not-in-windows.mbn" \
+  "$firmware_path/cdsp_dtbs.elf" "$firmware_path/qccdsp8380.mbn" >"$node/firmware-name"
+printf 'installed-cdsp' >"$firmware_root/$firmware_path/qccdsp8380.mbn"
+run_extractor --stage "$scratch/partial" -d "$driver_store"
+[[ $(<"$scratch/partial/$firmware_path/cdsp_dtbs.elf") == matching-dtb ]]
+run_extractor --install --no-rebuild --stage-dir "$scratch/partial"
+[[ $(<"$firmware_root/updates/$firmware_path/cdsp_dtbs.elf") == matching-dtb ]]
+echo "ok - missing firmware does not abort staging or installation"
+
+# With no companion, only byte-identical duplicates are safe to select.
+printf '%s\0' "$firmware_path/duplicate.mbn" >"$node/firmware-name"
+printf 'one' >"$driver_store/wrong/duplicate.mbn"
+printf 'two' >"$driver_store/matching/duplicate.mbn"
+run_extractor --stage "$scratch/ambiguous" -d "$driver_store"
+[[ ! -e $scratch/ambiguous/$firmware_path/duplicate.mbn ]]
+printf 'one' >"$driver_store/matching/duplicate.mbn"
+run_extractor --stage "$scratch/identical" -d "$driver_store"
+[[ $(<"$scratch/identical/$firmware_path/duplicate.mbn") == one ]]
+echo "ok - differing variants require a unique match"
+
+# A packaged zap shader still needs an initramfs entry when nothing is missing.
+printf '%s\0' "$firmware_path/qccdsp8380.mbn" >"$node/firmware-name"
+mkdir -p "$dt_root/gpu@0/zap-shader"
+printf '%s\0' "$firmware_path/qcdxkmsuc8380.mbn" >"$dt_root/gpu@0/zap-shader/firmware-name"
+printf 'zap' | gzip >"$firmware_root/$firmware_path/qcdxkmsuc8380.mbn.gz"
+run_extractor --install --no-rebuild -d "$driver_store"
+grep -Fq 'qcdxkmsuc8380.mbn.gz' "$scratch/root/etc/mkinitcpio.conf.d/qcom-firmware.conf"
+echo "ok - already installed GPU firmware is included in the initramfs"
+
+limine-update() { printf 'rebuild\n' >>"$QCOM_FW_ROOT/rebuilds"; }
+export -f limine-update
+run_extractor --install -d "$driver_store"
+[[ ! -e $scratch/root/rebuilds ]]
+rm "$scratch/root/etc/mkinitcpio.conf.d/qcom-firmware.conf"
+run_extractor --install -d "$driver_store"
+[[ $(<"$scratch/root/rebuilds") == rebuild ]]
+echo "ok - configuration-only changes rebuild the initramfs once"
