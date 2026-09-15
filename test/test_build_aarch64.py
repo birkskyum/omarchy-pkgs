@@ -39,6 +39,7 @@ class BuildAarch64Test(unittest.TestCase):
                 "INPUT_PACKAGES": "",
                 "GITHUB_ENV": str(self.root / "env"),
                 "GITHUB_OUTPUT": str(self.root / "output"),
+                "GITHUB_STEP_SUMMARY": str(self.root / "summary"),
                 **env,
             },
             capture_output=True,
@@ -53,6 +54,52 @@ class BuildAarch64Test(unittest.TestCase):
         checkout = next(step for step in WORKFLOW["jobs"]["build"]["steps"]
                         if step.get("uses", "").startswith("actions/checkout@"))
         self.assertIs(checkout["with"].get("persist-credentials"), False)
+
+    def test_native_runner_guard(self):
+        commands = self.root / "bin"
+        commands.mkdir()
+        uname = commands / "uname"
+        for arch, expected in (("aarch64", 0), ("x86_64", 1)):
+            with self.subTest(arch=arch):
+                uname.write_text(f"#!/bin/sh\nprintf '%s\\n' {arch}\n")
+                uname.chmod(0o755)
+                result = self.run_step("native", PATH=f"{commands}:{os.environ['PATH']}")
+                self.assertEqual(result.returncode, expected, result.stderr)
+
+    def test_manual_and_reusable_interfaces_are_preserved(self):
+        events = WORKFLOW.get("on", WORKFLOW.get(True))
+        self.assertEqual(events["workflow_dispatch"]["inputs"]["mirror"]["options"],
+                         ["edge", "rc", "stable"])
+        for name in ("pkgs_repository", "pkgs_ref"):
+            self.assertTrue(events["workflow_call"]["inputs"][name]["required"])
+        self.assertIn("artifact", events["workflow_call"]["outputs"])
+        uploads = [step for step in WORKFLOW["jobs"]["build"]["steps"]
+                   if step.get("uses", "").startswith("actions/upload-artifact@")]
+        packages = next(step for step in uploads if step["name"] == "Upload packages")
+        self.assertIn("always()", packages["if"])
+        self.assertEqual(packages["with"]["retention-days"], 14)
+
+    def test_empty_repository_is_rejected_without_explicit_packages(self):
+        repo = self.root / "repo"
+        repo.mkdir()
+        subprocess.run(["tar", "--zstd", "-cf", "omarchy.db.tar.zst", "--files-from", "/dev/null"],
+                       cwd=repo, check=True)
+        result = self.run_step("verify", REPO_DIR=str(repo), PACKAGES="")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("repository contains no packages", result.stderr)
+
+    def test_summary_accepts_cached_packages_but_rejects_empty_outputs(self):
+        repo = self.root / "repo"
+        repo.mkdir()
+        output = self.root / "build-output"
+        output.mkdir()
+        env = {"REPO_DIR": str(repo), "OUTPUT_DIR": str(output), "MIRROR": "edge"}
+        result = self.run_step("summary", **env)
+        self.assertNotEqual(result.returncode, 0)
+        (repo / "example-1-1-aarch64.pkg.tar.zst").touch()
+        result = self.run_step("summary", **env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("example-1-1-aarch64.pkg.tar.zst", (self.root / "summary").read_text())
 
     def test_known_package_and_rc_mirror(self):
         result = self.run_step("meta", INPUT_PACKAGES=" example ", INPUT_MIRROR="rc")

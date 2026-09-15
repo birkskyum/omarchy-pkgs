@@ -1,6 +1,8 @@
-name: aarch64 package repo
+name: Build aarch64 Packages
 
-# Build an aarch64 Omarchy repository for manual or reusable workflows.
+# Native ARM builds for manual use or an installer's reusable workflow.
+# Artifacts are unsigned. Production signing and publishing belong on the
+# repository host, via bin/upload-prebuilt --arch aarch64 --mirror <mirror>.
 
 on:
   workflow_dispatch:
@@ -12,8 +14,9 @@ on:
         type: string
         default: ""
       mirror:
-        description: "edge, rc or stable"
-        type: string
+        description: "Build channel (package channel and release-ring policy applies)"
+        type: choice
+        options: [edge, rc, stable]
         default: edge
   workflow_call:
     inputs:
@@ -34,6 +37,9 @@ on:
       mirror:
         type: string
         default: edge
+    secrets:
+      BASECAMP_CHATBOT_URL:
+        required: false
     outputs:
       artifact:
         description: "Name of the uploaded repository artifact"
@@ -42,6 +48,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04-arm
+    # Targeted builds must include required recipes from this repository.
+    # A full build may exceed GitHub's six-hour job limit.
     timeout-minutes: 360
     permissions:
       contents: read
@@ -58,6 +66,22 @@ jobs:
           repository: ${{ inputs.pkgs_repository || github.repository }}
           ref: ${{ inputs.pkgs_ref || github.ref }}
           persist-credentials: false
+
+      - name: Confirm the runner is natively aarch64
+        id: native
+        # bin/build falls back to QEMU when it finds an x86_64 host. That still
+        # produces correct packages, but takes many times longer -- long enough
+        # to hit the job timeout. If this ever runs somewhere else, fail loudly
+        # rather than silently emulating.
+        run: |
+          set -euo pipefail
+          arch=$(uname -m)
+          echo "Runner architecture: $arch"
+          if [[ $arch != "aarch64" ]]; then
+            echo "::error::Expected a native aarch64 runner, got $arch." \
+                 "Building aarch64 under emulation here would exceed the job timeout."
+            exit 1
+          fi
 
       - name: Resolve inputs
         id: meta
@@ -116,7 +140,7 @@ jobs:
           echo "new package files: ${#files[@]}"
           [[ ${#files[@]} -gt 0 ]] && cp -v "${files[@]}" "$REPO_DIR/"
           chmod -R a+rwX pkgs.omarchy.org
-          bin/repo update --arch "$ARCH" --mirror "$MIRROR"
+          bin/repo update --local --arch "$ARCH" --mirror "$MIRROR"
 
       - name: Verify repository
         id: verify
@@ -127,7 +151,13 @@ jobs:
           dbdir=$(mktemp -d)
           trap 'rm -rf "$dbdir"' EXIT
           tar --use-compress-program=unzstd -xf omarchy.db.tar.zst -C "$dbdir"
-          for desc in "$dbdir"/*/desc; do
+          shopt -s nullglob
+          descriptions=("$dbdir"/*/desc)
+          if [[ ${#descriptions[@]} == 0 ]]; then
+            echo "::error::The repository contains no packages." >&2
+            exit 1
+          fi
+          for desc in "${descriptions[@]}"; do
             awk '
               /^%BASE%$/ { getline; base=$0 }
               /^%NAME%$/ { getline; name=$0 }
@@ -146,6 +176,34 @@ jobs:
           du -sh .
           exit $missing
 
+      - name: Summarize available packages
+        id: summary
+        if: always() && steps.meta.outcome == 'success'
+        run: |
+          shopt -s nullglob
+          files=("$REPO_DIR"/*.pkg.tar.zst "$REPO_DIR"/*.pkg.tar.xz "$OUTPUT_DIR"/*.pkg.tar.zst "$OUTPUT_DIR"/*.pkg.tar.xz)
+          {
+            echo "## aarch64 packages ($MIRROR)"
+            echo
+            if [[ ${#files[@]} -gt 0 ]]; then
+              printf '%s\n' "${files[@]}"
+            else
+              echo "No packages are available. Check the selected recipes, architectures, and channels."
+              echo "::error::No package artifacts were produced or restored." >&2
+              exit 1
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Keep completed packages for diagnostics even if another recipe fails.
+      - name: Upload packages
+        if: always() && steps.meta.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: omarchy-aarch64-${{ env.MIRROR }}-${{ github.run_id }}
+          path: ${{ env.OUTPUT_DIR }}/*.pkg.tar.*
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Upload repository artifact
         uses: actions/upload-artifact@v4
         with:
@@ -162,3 +220,15 @@ jobs:
           path: logs/
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Notify Basecamp on failure
+        if: failure() && env.BASECAMP_CHATBOT_URL != ''
+        env:
+          BASECAMP_CHATBOT_URL: ${{ secrets.BASECAMP_CHATBOT_URL }}
+        run: |
+          curl -s -o /dev/null \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg content \
+              "🔴 <strong>aarch64 build failed</strong><br><a href=\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\">View run</a>" \
+              '{content: $content}')" \
+            "$BASECAMP_CHATBOT_URL"
