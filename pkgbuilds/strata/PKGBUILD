@@ -1,10 +1,10 @@
 pkgname=strata
-pkgver=0.8.0
-pkgrel=2
+pkgver=0.17.0
+pkgrel=1
 pkgdesc='Fast, keyboard-first file manager for modern Linux desktops'
 arch=('x86_64' 'aarch64')
 url='https://github.com/lgse/strata'
-license=('GPL-3.0-or-later')
+license=('MIT')
 
 depends=(
   'bash'
@@ -20,6 +20,7 @@ depends=(
   'graphene'
   'gst-libav'
   'gst-plugins-good'
+  'gvfs'
   'gtk4'
   'gtksourceview5'
   'hicolor-icon-theme'
@@ -38,7 +39,7 @@ conflicts=('strata-git')
 options=('!debug' '!lto')
 
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('8a6179ad5673afd8036ff6640c1740f6fa676516a05346c180d67ef98c4a56f7')
+sha256sums=('d1f54c1a2d88b958f5d463c9c37fac73a982de7ae893b7c731820cf557d24f5f')
 
 prepare() {
   cd "$pkgname-$pkgver"
@@ -73,7 +74,18 @@ check() {
   STRATA_BUILD_COMMIT=$(<.build-commit)
   export STRATA_RELEASE_TAG="v$pkgver"
   export STRATA_BUILD_KIND=stable
-  cargo test --frozen --release --all-targets --all-features
+  # Search fixtures depend on directory enumeration order and fail on overlayfs.
+  # Run them on tmpfs; other suites execute fixtures, so cannot use noexec /dev/shm.
+  local search_tmp
+  search_tmp=$(mktemp -d /dev/shm/strata-tests.XXXXXXXX) || return 1
+  local test_status=0
+  TMPDIR="$search_tmp" cargo test --frozen --release --all-targets --all-features \
+    services::search::tests:: -- --test-threads=1 || test_status=$?
+  rm -rf -- "$search_tmp"
+  (( test_status == 0 )) || return "$test_status"
+
+  cargo test --frozen --release --all-targets --all-features \
+    -- --test-threads=1 --skip services::search::tests::
 }
 
 package() {
@@ -84,6 +96,10 @@ package() {
     "$pkgdir/usr/share/applications/io.github.lgse.Strata.desktop"
   install -Dm644 data/icons/scalable/apps/io.github.lgse.Strata.svg \
     "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.lgse.Strata.svg"
+  # Payload for the app's per-user FileManager1 opt-in; upstream's own
+  # packaging stages it here, not in /usr/share/dbus-1.
+  install -Dm644 data/io.github.lgse.Strata.FileManager1.service \
+    "$pkgdir/usr/share/strata/io.github.lgse.Strata.FileManager1.service"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 THIRD_PARTY_LICENSES.md \
     "$pkgdir/usr/share/licenses/$pkgname/THIRD_PARTY_LICENSES.md"

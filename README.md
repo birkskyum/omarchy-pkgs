@@ -23,9 +23,9 @@ The filesystem no longer encodes release policy. Instead:
   (`OMARCHY_RC_PINS=1`, which `omarchy-release rc` sets) may build it for rc — master's
   shipped pins can never overwrite an in-flight RC. The dev pair
   (`omarchy-dev`, `omarchy-settings-dev`) is pinned to `edge`
-- AUR sync behavior is controlled by `source`, `sync`, `aur`, patches, and hooks in `.omarchy/`
+- Omarchy owns every checked-in recipe; upstream watches update release metadata without replacing packaging or architecture support
 - packages can opt out of unscoped builds with `skip_build`; explicit `--package` builds remain available
-- packages that follow a vendor release feed instead of the AUR carry an `.omarchy/upstream.sh` hook
+- packages follow direct upstream watches/providers in `.omarchy/package.json`, or a custom `.omarchy/upstream.sh` hook
 
 ## Prerequisites
 ### aarch64 Builds (Optional)
@@ -124,6 +124,14 @@ bin/repo advance --from edge --to rc
 ### Complete Workflow
 
 The release command is smart and **incremental** - it only builds packages that have changed or are missing. You generally don't need to specify a package manually unless you are debugging a specific failure.
+
+When a package fails, a completed build run still signs and publishes the packages
+that succeeded. Failed packages and their blocked dependents remain queued with
+failure backoff; retries compare against the updated repository and skip the
+published versions. Only artifacts recorded by fully completed package builds
+are eligible for a partial release. An interrupted build, a failed publication
+step, or an incomplete pair using deferred runtime dependencies still stops the
+release. Reports distinguish partial publication from complete success.
 
 ```bash
 # Build changed/new packages, sign, promote, clean, update, and sync
@@ -321,14 +329,16 @@ push uploaded, so `push` stops when it finds packages already staged there —
 usually leftovers from a failed run. Remove them on the host, or pass
 `--include-staged` to publish them too.
 
-### Sync AUR PKGBUILDs
+### Import an initial AUR recipe
 
 ```bash
-bin/sync-aur                            # Sync all AUR packages with sync enabled
-bin/sync-aur yay v4l2-relayd            # Sync specific packages
+bin/add-package package-name --source aur
 ```
 
-AUR sync is metadata-driven. It preserves `.omarchy/`, replaces the package root with AUR contents, applies `.omarchy/patches/*.patch`, runs `.omarchy/post-sync.sh` when present, applies pkgrel metadata, removes AUR-only `.SRCINFO` and `.gitignore` files, and records `upstream_commit`.
+AUR is an optional source for an initial recipe. Imported packages become
+Omarchy-owned immediately; subsequent updates use direct upstream releases.
+There is no scheduled AUR sync. Edit the checked-in PKGBUILD to maintain
+architecture support and packaging behavior.
 
 ### Sync Upstream Releases
 
@@ -542,8 +552,8 @@ bin/omarchy-release                  # Release front door (start / pick / rc / s
 bin/repo list                        # List package metadata
 bin/repo deploy                      # Build locally, then publish from the host
 bin/repo push                        # Upload local builds to the host and publish
-bin/add-package <package>            # Add an AUR/local package with metadata
-bin/package-worktree <package>       # Create upstream/patched/current scratch workspace
+bin/add-package <package>            # Add an Omarchy-owned package with metadata
+bin/package-worktree <package>       # Inspect historical AUR provenance in a scratch workspace
 bin/repo remove <package>            # Remove package
 bin/sync-upstream                    # Update packages that track a vendor release feed
 bin/sync-rebuilds                    # Bump pkgrel for packages whose dependencies moved
@@ -562,7 +572,7 @@ bin/repo list                        # Table view of source package metadata
 bin/repo list --json                 # Agent/script-friendly JSON
 bin/repo list --repo --mirror stable # List packages in a published repo database
 
-bin/package-worktree v4l2-relayd     # Create upstream/patched/current scratch workspace
+bin/package-worktree yay            # Compare with the original imported AUR recipe
 ```
 
 ## Cutting an Omarchy Release
@@ -676,9 +686,7 @@ omarchy-pkgs/
 │       ├── PKGBUILD
 │       └── .omarchy/
 │           ├── package.json    # Source/sync/release metadata
-│           ├── patches/        # Omarchy patches reapplied after AUR sync
-│           ├── post-sync.sh    # Optional dynamic post-sync customization hook
-│           └── upstream.sh     # Optional vendor release feed hook (non-AUR packages)
+│           └── upstream.sh     # Optional custom vendor release feed hook
 ├── build/
 ├── build-output/               # Unsigned packages (temporary)
 │   ├── edge/                   # (rc/ and stable/ alongside, each x86_64 + aarch64)
@@ -699,44 +707,27 @@ Each source package has Omarchy metadata at `pkgbuilds/<package>/.omarchy/packag
 Minimal examples:
 
 ```json
-{ "source": "aur" }
-```
-
-```json
-{ "source": "aur", "sync": false }
-```
-
-```json
-{ "source": "aur", "release_ring": "fast" }
-```
-
-```json
 { "source": "local" }
-```
-
-```json
+{ "source": "local", "release_ring": "fast" }
 { "source": "local", "skip_build": true }
-```
-
-```json
-{ "source": "aur", "pkgrel": { "suffix": 1 } }
+{ "source": "local", "upstream": { "watch": { "github": "abenz1267/walker", "pattern": "v(?P<version>[0-9]+(?:\\.[0-9]+)*)" } } }
 ```
 
 Fields:
 
-- `source`: `aur` or `local`. A `local` package can still follow an upstream release, either declaratively via `upstream` or with an `.omarchy/upstream.sh` hook.
-- `upstream`: optional for `local` packages following GitHub releases, git tags, npm dist-tags, or a Debian `Packages` index. GitHub architecture assets may be a string or an ordered array, and can be combined with disjoint versioned `sources` — see [Sync Upstream Releases](#sync-upstream-releases). Mutually exclusive with `.omarchy/upstream.sh`.
+- `source`: `local` for maintained packages. The legacy `aur` value is used only during an initial import. A local recipe can follow an upstream watch, provider, or `.omarchy/upstream.sh` hook.
+- `upstream`: optional direct release watch (see [Upstream watches](docs/upstream-sources.md)), or an existing GitHub, git-tag, npm, or Debian provider. GitHub architecture assets may be a string or an ordered array, and can be combined with disjoint versioned `sources` — see [Sync Upstream Releases](#sync-upstream-releases). Mutually exclusive with `.omarchy/upstream.sh`.
 - `min_release_age`: optional quarantine for upstream releases (`"24h"`, `"2d"`, or bare seconds). The newest release older than the window ships; anything younger waits, and a release whose age cannot be proven fails the sync. Bypass deliberately with `BYPASS_MIN_RELEASE_AGE=1 bin/sync-upstream <package>`.
-- `sync`: optional for AUR packages; defaults to `true`. Set `false` for AUR-origin packages that Omarchy maintains manually.
-- `aur`: optional AUR package name when it differs from the local package directory, usually for split packages.
+- `sync`: `false` records an existing manual maintenance hold. Held packages have no upstream watch/provider/hook and are excluded from automatic updates.
+- `origin`: optional historical import provenance, with `aur` (package name) and `commit`. It does not control updates.
 - `release_ring`: optional. `fast` means the package is built directly for stable as well as edge, with the artifacts replicated into rc for parity. Packages without a ring build in edge and reach stable through the pipeline (`bin/repo advance`).
 - `channels`: optional array bounding where the package may be built (`edge`, `rc`, `stable`). Without the key a package is a member of every channel and follows the default build rules above; `bin/repo advance` refuses to carry a package anywhere it isn't a member.
 - `pinned`: optional boolean. A pinned package's version is set per release by `omarchy-release` on the `rc` branch, so it is never built for stable (promotion only) and is built for rc only from that branch's worktree (`OMARCHY_RC_PINS=1`). Used by `omarchy` and `omarchy-settings`.
 - `skip_build`: optional boolean; defaults to `false`. Set `true` to exclude a package from scheduled version checks and unscoped builds. The package can still be built explicitly with `bin/repo release --package <name>`.
-- `pkgrel`: optional Omarchy pkgrel suffix for a version-pinned rebuild bump. This emits `<aur pkgrel>.<suffix>` instead of replacing AUR's pkgrel. `offset` can be used only when preserving monotonic upgrades from old absolute pkgrel bumps. The metadata is removed automatically when AUR sync changes `pkgver`; the current package version is read from the checked-in PKGBUILD, so the version is not duplicated in JSON.
+- `pkgrel`: legacy import customization metadata. Maintained recipes keep their complete package release directly in PKGBUILD; rebuilds increment it there.
 - `rebuild_on`: optional array of package names this package links against closely enough that it must be rebuilt when they change, independent of its own source. Read by `bin/sync-rebuilds`.
 - `rebuilt_against`: written by `bin/sync-rebuilds`. Maps each published architecture to the versions of its `rebuild_on` packages that the current pkgrel was bumped for.
-- `upstream_commit`: set by `bin/sync-aur` for AUR packages. Used by `bin/package-worktree` to recreate the exact raw AUR package that Omarchy last synced.
+- `upstream_commit`: legacy AUR metadata, superseded by `origin.commit`. `bin/package-worktree` can use historical provenance to inspect the original recipe.
 
 ### Build Matrix
 
@@ -748,78 +739,26 @@ Fields:
 
 ## Adding Packages
 
-### From AUR
+### Start from an existing recipe
 
 ```bash
-bin/add-package package-name
+bin/add-package package-name --source aur --fast
+# Review the imported files, own any architecture/packaging changes directly,
+# and declare an upstream watch/provider or hook in .omarchy/.
+bin/sync-upstream package-name
 bin/repo release --package package-name
 ```
 
-### From AUR, fast release ring
+The import records historical provenance in `origin`. It does not opt a package
+into future AUR imports. Upstream watches update only release scalars and source
+checksums; downstream build behavior stays in the recipe. Ordinary source-code
+patches still belong beside PKGBUILD and are applied by `prepare()` as needed.
+
+### Custom package
 
 ```bash
-bin/add-package package-name --fast
-bin/repo release --package package-name
-bin/repo release --mirror stable --package package-name
-```
-
-### AUR-origin, manually maintained by Omarchy
-
-```bash
-bin/add-package package-name --no-sync
-```
-
-### Local Customizations for AUR Packages
-
-For static changes, create `pkgbuilds/package-name/.omarchy/patches/*.patch` to maintain modifications across AUR syncs.
-
-The recommended workflow is to use a scratch workspace:
-
-```bash
-bin/package-worktree package-name --dir /tmp/package-name-worktree
-```
-
-This creates:
-
-```text
-upstream/  # raw AUR package at upstream_commit
-patched/   # AUR + existing Omarchy .omarchy customizations
-current/   # current checked-in package directory
-```
-
-Patch-authoring flow:
-
-```bash
-# 1. Make the intended change in pkgbuilds/package-name/
-
-# 2. Recreate the scratch workspace
-bin/package-worktree package-name --dir /tmp/package-name-worktree
-
-# 3. Inspect drift from patched -> current
-# For multi-file changes, inspect this and split into focused patches.
-diff -ruN /tmp/package-name-worktree/patched /tmp/package-name-worktree/current
-
-# For a single PKGBUILD change, write a patch like this:
-mkdir -p pkgbuilds/package-name/.omarchy/patches
-(
-  cd /tmp/package-name-worktree/patched
-  diff -u --label a/PKGBUILD --label b/PKGBUILD \
-    PKGBUILD /tmp/package-name-worktree/current/PKGBUILD || true
-) > pkgbuilds/package-name/.omarchy/patches/my-fix.patch
-
-# 4. Verify the package is reproducible from AUR + .omarchy
-bin/sync-aur package-name
-bin/package-worktree package-name --dir /tmp/package-name-check
-diff -ruN /tmp/package-name-check/patched /tmp/package-name-check/current
-```
-
-For dynamic changes that depend on the current upstream version, add `pkgbuilds/package-name/.omarchy/post-sync.sh`. The hook runs after the AUR package is copied into a temporary worktree and before the Omarchy pkgrel suffix is applied. After patches/hooks/metadata pkgrel overrides, `bin/sync-aur` removes AUR-only `.SRCINFO` and `.gitignore` files before writing the package back.
-
-### Custom Package
-
-```bash
-bin/add-package my-package --local --scaffold
-# Fill in PKGBUILD and package files
+bin/add-package my-package --scaffold
+# Fill in PKGBUILD, package files, and upstream metadata
 bin/repo release --package my-package
 ```
 
@@ -858,11 +797,33 @@ bin/repo sync --arch aarch64
 
 The build system automatically handles inter-package dependencies:
 
-1. Parses `depends=()` and `makedepends=()` from PKGBUILDs
-2. Builds in correct order
-3. Makes newly-built packages available via temporary `[omarchy-build]` repo
+1. Plans dependency order once, including `depends`, `makedepends`,
+   `checkdepends`, and their architecture-specific arrays.
+2. Builds each package in a fresh container. Installed packages and changes
+   to the container's system files cannot carry over to the next build.
+3. Shares successful artifacts through the temporary `[omarchy-build]` repo,
+   installing newly built prerequisites in each consumer's container.
+4. Blocks consumers of a failed prerequisite while continuing independent
+   builds. Any failure still prevents the release from publishing.
 
 Example: If `aether` depends on `hyprshade`, `hyprshade` is built first.
+
+Isolation also lets the release and dev Omarchy pairs build in the same run:
+Flea can install `omarchy` without preventing `omarchy-dev` from installing
+its conflicting settings package in a different container.
+
+Pacman downloads are cached under `cache/pacman/<channel>/<arch>/` across
+containers and runs. The installed package database is never shared. Each
+container updates its base system before resolving build dependencies, so a
+cached builder image cannot cause a partial system upgrade. The existing
+`OMARCHY_KEEP_BUILD_WORKSPACE`, `OMARCHY_SKIP_BUILDER_IMAGE`, and
+`OMARCHY_DEFER_RUNTIME_DEPS` flags retain their behavior.
+
+`tests/build-isolation.sh` exercises conflicting package pairs, failed
+prerequisites, resumed builds, cache replacement, and deferred dependencies
+using real containers and pacman transactions. It uses the prepared builder
+image, or an image named by `TEST_BUILDER_IMAGE`; CI builds the small fixture
+image in `tests/build-isolation.Dockerfile`.
 
 ## Version Management
 
@@ -880,9 +841,8 @@ The repository includes GitHub workflows and systemd services for automated rele
 
 #### GitHub Workflows
 
-1. **sync-aur.yml** (Every 6 hours): Syncs AUR packages according to `.omarchy/package.json` and opens a PR when changes are found.
-2. **sync-upstream.yml** (Every 6 hours): Runs `.omarchy/upstream.sh` for packages that track a vendor release feed and opens a PR when a newer version is out.
-3. **sync-rebuilds.yml** (Every 6 hours): Bumps pkgrel for packages whose `rebuild_on` dependencies have moved in the official repositories and opens a PR.
+1. **sync-upstream.yml** (Every 6 hours): Watches direct upstream feeds and updates owned recipes. Successful package updates reach a PR even if another feed fails; failed recipes stay untouched and the workflow remains red.
+2. **sync-rebuilds.yml** (Every 6 hours): Bumps pkgrel for packages whose `rebuild_on` dependencies have moved in the official repositories and opens a PR.
 
 #### Systemd Services
 

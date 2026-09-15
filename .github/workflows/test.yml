@@ -7,6 +7,20 @@ on:
   workflow_dispatch:
 
 jobs:
+  build-isolation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare fixture builder
+        run: docker build -t omarchy-build-isolation-test -f tests/build-isolation.Dockerfile tests
+      - name: Verify isolated builds with real pacman transactions
+        env:
+          CONTAINER_ENGINE: docker
+          TEST_BUILDER_IMAGE: omarchy-build-isolation-test
+        run: tests/build-isolation.sh
+
   self-tests:
     runs-on: ubuntu-latest
 
@@ -25,11 +39,14 @@ jobs:
             -w /workspace \
             archlinux:base-devel bash -lc '
               set -euo pipefail
-              pacman -Syu --noconfirm git jq python-yaml xz zstd
+              pacman -Syu --noconfirm git jq python python-yaml libarchive xz zstd
+              python tests/upstream-watch.py
               ./bin/sync-upstream self-test
               ./bin/sync-rebuilds --self-test
               ./bin/omarchy-pkgs self-test
               ./bin/omarchy-release self-test
+              ./tests/partial-release.sh
+              ./tests/published-build-plan.sh
               shopt -s nullglob
               for test in pkgbuilds/*/test.sh; do
                 bash "$test"

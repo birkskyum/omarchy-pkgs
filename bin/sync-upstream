@@ -9,6 +9,7 @@ source "$BUILD_ROOT/helpers/upstream-github.sh"
 
 TEMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TEMP_DIR"' EXIT
+export UPSTREAM_CACHE_DIR="$TEMP_DIR/watch-cache"
 
 SPECIFIC_PACKAGES=()
 
@@ -332,6 +333,12 @@ sync_package() {
     return 0
   fi
 
+  if jq -e '.sync == false' "$package_dir/.omarchy/package.json" >/dev/null 2>&1; then
+    print_info "Skipping $package: upstream updates held by sync=false"
+    ((++SKIPPED))
+    return 0
+  fi
+
   local provider has_upstream=false
   provider=$(package_upstream_provider "$package_dir")
   if package_has_upstream_provider "$package_dir"; then
@@ -371,6 +378,21 @@ sync_package() {
   fi
 
   print_info "Checking $package for upstream releases..."
+
+  if [[ "$provider" == watch ]]; then
+    local result
+    if ! result=$(python3 "$BUILD_ROOT/helpers/upstream-watch.py" sync "$package_dir" --min-age "$min_age"); then
+      print_error "Upstream watch failed for $package"
+      ((++FAILED))
+    elif [[ $(jq -r .status <<<"$result") == updated ]]; then
+      print_success "  $(jq -r '.before + " -> " + .after' <<<"$result")"
+      ((++UPDATED))
+    else
+      print_info "  $(jq -r '.reason' <<<"$result")"
+      ((++SKIPPED))
+    fi
+    return 0
+  fi
 
   local release release_status=0
   if [[ -n "$provider" ]]; then
@@ -757,6 +779,9 @@ EOF
   mkdir -p "$one_root"
   cp -a "$BUILD_ROOT/pkgbuilds/1password" "$one_root/1password"
   one_dir="$one_root/1password"
+  # Keep the real recipe shape, but make the fixture's starting version stable.
+  # Otherwise a routine package update can outrun the mocked release below.
+  sed -i -e 's/^pkgver=.*/pkgver=8.12.34/' -e 's/^pkgrel=.*/pkgrel=2/' "$one_dir/PKGBUILD"
   debian_fetch_packages() {
     printf 'Package: 1password\nVersion: %s\n' "$one_version"
   }
@@ -970,6 +995,10 @@ EOF
   PKGBUILDS_DIR="$e2e_root" sync_package selftest-broken >/dev/null 2>&1 || true
   check "malformed upstream fails the sync instead of skipping" "1" "$((FAILED - prev_failed))"
   FAILED=0
+
+  if ! bash "$BUILD_ROOT/pkgbuilds/cua-driver-bin/.omarchy/upstream-test.sh"; then
+    failures=$((failures + 1))
+  fi
 
   echo ""
   if [[ "$failures" -eq 0 ]]; then
