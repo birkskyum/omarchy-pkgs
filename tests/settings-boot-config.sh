@@ -2,7 +2,7 @@
 # Exercise the real package functions with a minimal, synthetic runtime tree.
 set -euo pipefail
 
-BUILD_ROOT=$(realpath "${BASH_SOURCE[0]%/*}/../..")
+BUILD_ROOT=$(realpath "${BASH_SOURCE[0]%/*}/..")
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
 fixture=$scratch/src/omarchy
