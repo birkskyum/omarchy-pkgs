@@ -47,4 +47,8 @@ jobs:
               ./bin/omarchy-release self-test
               ./tests/partial-release.sh
               ./tests/published-build-plan.sh
+              shopt -s nullglob
+              for test in pkgbuilds/*/test.sh; do
+                bash "$test"
+              done
             '
