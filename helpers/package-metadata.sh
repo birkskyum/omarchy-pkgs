@@ -3,15 +3,13 @@
 # Expects package directories in $PKGBUILDS_DIR, each with:
 #   .omarchy/package.json
 #
-# Minimal schema:
-#   { "source": "aur" }
-#   { "source": "aur", "sync": false }
-#   { "source": "aur", "aur": "different-aur-name" }
-#   { "source": "aur", "release_ring": "fast" }
-#   { "source": "aur", "skip_build": true }
-#   { "source": "aur", "pkgrel": { "suffix": 1, "offset": 1 } }
-#   { "source": "aur", "rebuild_on": ["qt6-base"] }
+# Minimal schema (legacy source:aur remains readable for initial imports):
 #   { "source": "local" }
+#   { "source": "local", "sync": false }
+#   { "source": "local", "release_ring": "fast" }
+#   { "source": "local", "skip_build": true }
+#   { "source": "local", "rebuild_on": ["qt6-base"] }
+#   { "source": "local", "upstream": { "watch": { "github": "owner/repo", "pattern": "v(?P<version>[0-9.]+)" } } }
 #   { "source": "local", "channels": ["edge"] }
 #   { "source": "local", "channels": ["edge", "rc", "stable"] }
 #   { "source": "local", "min_release_age": "24h" }
@@ -21,7 +19,7 @@
 #   { "source": "local", "upstream": { "npm": "@scope/package", "sources": { "any": ["{npm_tarball}"] } } }
 #   { "source": "local", "upstream": { "debian": "https://example/debian/dists/stable/main/binary-amd64/Packages", "package": "example", "sources": { "any": ["https://example/releases/{pkgver}.tar.gz"] } } }
 #
-# bin/sync-aur also writes upstream_commit for AUR-backed packages, and
+# bin/import-aur records historical origin.aur and origin.commit;
 # bin/sync-rebuilds writes rebuilt_against for packages declaring rebuild_on.
 
 if [[ -z "${PKGBUILDS_DIR:-}" ]]; then
@@ -191,6 +189,18 @@ package_supports_arch() {
     *" any "* | *" $target "*) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+# The channel DB indexes only its newest version, but older published archives
+# remain immutable. Both the scheduler and build planner must skip an existing
+# filename even when the checkout differs from the version currently indexed.
+package_version_is_published() {
+  local repo_dir="$1" package="$2" version="$3" target="$4" path
+  for path in "$repo_dir/$package-$version-$target.pkg.tar."* \
+              "$repo_dir/$package-$version-any.pkg.tar."*; do
+    [[ -f "$path" && "$path" != *.sig ]] && return 0
+  done
+  return 1
 }
 
 # Channel membership: where a package may be published. Packages without a
@@ -523,8 +533,9 @@ validate_package_metadata() {
     if has("upstream") | not then true
     elif (.upstream | type) != "object" then false
     else .upstream |
-      ([has("github"), has("git_tags"), has("npm"), has("debian")] | map(select(.)) | length) == 1
-      and if has("github") then
+      ([has("github"), has("git_tags"), has("npm"), has("debian"), has("watch")] | map(select(.)) | length) == 1
+      and if has("watch") then (.watch | type == "object")
+      elif has("github") then
         (.github | type == "string" and test("\\A[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\\z"))
         and (if has("checksums") then (.checksums | type == "string" and length > 0) else true end)
         and (if has("digests") then (.digests | type == "boolean") else true end)
@@ -550,8 +561,12 @@ validate_package_metadata() {
       end
     end
   ' "$metadata" >/dev/null; then
-    echo "invalid upstream for $(basename "$pkgdir"): configure exactly one valid github, git_tags, npm, or debian provider"
+    echo "invalid upstream for $(basename "$pkgdir"): configure exactly one valid github, git_tags, npm, debian, or watch provider"
     return 1
+  fi
+
+  if jq -e '.upstream? | objects | has("watch")' "$metadata" >/dev/null; then
+    python3 "${BASH_SOURCE[0]%/*}/upstream-watch.py" validate "$pkgdir" || return 1
   fi
 
   pkgrel_type=$(jq -r 'if has("pkgrel") then .pkgrel | type else "missing" end' "$metadata")

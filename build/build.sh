@@ -411,6 +411,11 @@ build_package() {
       ln -sf omarchy-build.db.tar.zst omarchy-build.db || return 1
     fi
 
+    # A release may publish successful builds even when a peer fails. Record
+    # outputs only after this package's entire split build has completed.
+    mkdir -p "$BUILD_PLAN_DIR/artifacts" || return 1
+    printf '%s\n' "${new_pkgs[@]}" > "$BUILD_PLAN_DIR/artifacts/$pkg" || return 1
+
     echo "    Successfully built $pkg"
     return 0
   else
@@ -526,9 +531,17 @@ check_needs_build() {
 
   if [[ "$local_version" == "$pkgbuild_version" ]]; then
     return 1  # Already up to date
-  else
-    return 0  # Needs building
   fi
+
+  # Match check-versions: a retained archive is already published even when
+  # the DB now indexes a newer release (for example, 4.0.4rc1 vs 4.0.3).
+  # Rebuilding it would produce different bytes under an immutable filename.
+  if package_version_is_published "$FINAL_OUTPUT_DIR" "$pkg" "$pkgbuild_version" "$ARCH"; then
+    echo "  + $pkg $pkgbuild_version - archive already published; skipping rebuild"
+    return 1
+  fi
+
+  return 0  # Needs building
 }
 
 # Collect packages that should be built for the selected mirror

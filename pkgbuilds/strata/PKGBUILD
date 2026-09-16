@@ -1,10 +1,10 @@
 pkgname=strata
-pkgver=0.11.2
+pkgver=0.18.0
 pkgrel=1
 pkgdesc='Fast, keyboard-first file manager for modern Linux desktops'
 arch=('x86_64' 'aarch64')
 url='https://github.com/lgse/strata'
-license=('GPL-3.0-or-later')
+license=('MIT')
 
 depends=(
   'bash'
@@ -20,6 +20,7 @@ depends=(
   'graphene'
   'gst-libav'
   'gst-plugins-good'
+  'gvfs'
   'gtk4'
   'gtksourceview5'
   'hicolor-icon-theme'
@@ -38,7 +39,7 @@ conflicts=('strata-git')
 options=('!debug' '!lto')
 
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('cfc8b1c3a9a5fde518c5862b58af7722e942b5f394c60fd53822dd642c1f30a0')
+sha256sums=('82cfa5701f537e53d235b30e9450e1fcd5f2e7ccfea64ba317941e8e8766094b')
 
 prepare() {
   cd "$pkgname-$pkgver"
@@ -73,7 +74,18 @@ check() {
   STRATA_BUILD_COMMIT=$(<.build-commit)
   export STRATA_RELEASE_TAG="v$pkgver"
   export STRATA_BUILD_KIND=stable
-  cargo test --frozen --release --all-targets --all-features
+  # Search fixtures depend on directory enumeration order and fail on overlayfs.
+  # Run them on tmpfs; other suites execute fixtures, so cannot use noexec /dev/shm.
+  local search_tmp
+  search_tmp=$(mktemp -d /dev/shm/strata-tests.XXXXXXXX) || return 1
+  local test_status=0
+  TMPDIR="$search_tmp" cargo test --frozen --release --all-targets --all-features \
+    services::search::tests:: -- --test-threads=1 || test_status=$?
+  rm -rf -- "$search_tmp"
+  (( test_status == 0 )) || return "$test_status"
+
+  cargo test --frozen --release --all-targets --all-features \
+    -- --test-threads=1 --skip services::search::tests::
 }
 
 package() {

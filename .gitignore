@@ -37,3 +37,6 @@ pkgbuilds/yay/yay/
 .srcdest/
 .repo-host
 .worktrees/
+
+# Python helpers and offline tests
+__pycache__/
