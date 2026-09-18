@@ -7,6 +7,7 @@ trap 'rm -rf "$scratch"' EXIT
 export OMARCHY_KERNEL_SHIM_ROOT=$scratch
 export SHIM_NATIVE=0 SHIM_KERNEL_PRESENT=1
 export SHIM_IMAGE_OWNER=linux-aarch64
+export SHIM_DIR_OWNERS=linux-aarch64
 
 pacman() {
   if [[ $1 == -Qlq ]]; then
@@ -19,7 +20,7 @@ pacman() {
       ;;
     /usr/lib/modules/test)
       ((SHIM_KERNEL_PRESENT)) || return 1
-      printf 'linux-aarch64\n'
+      printf '%s\n' "$SHIM_DIR_OWNERS"
       ;;
     /usr/lib/modules/test/pkgbase | /usr/lib/modules/test/vmlinuz)
       [[ $SHIM_NATIVE == 1 || $2 == /usr/lib/modules/test/"$SHIM_NATIVE" ]] || return 1
@@ -50,6 +51,16 @@ cmp "$scratch/boot/Image" "$modules/vmlinuz"
 [[ $(stat -c %a "$modules/vmlinuz") == $(stat -c %a "$scratch/boot/Image") ]]
 [[ ! -e $scratch/rebuilds ]]
 echo 'ok - kernel installation supplies metadata before the normal rebuild hook'
+
+for SHIM_DIR_OWNERS in $'linux-aarch64\nlinux-aarch64-headers' \
+  $'linux-aarch64-headers\nlinux-aarch64'; do
+  rm "$modules/pkgbase" "$modules/vmlinuz"
+  run_shim usr/lib/modules/test/
+  [[ $(<"$modules/pkgbase") == linux-aarch64 ]]
+  cmp "$scratch/boot/Image" "$modules/vmlinuz"
+done
+echo 'ok - shared kernel and headers directories use the image owner in either order'
+SHIM_DIR_OWNERS=linux-aarch64
 
 printf 'replacement-kernel' >"$scratch/boot/Image"
 run_shim usr/lib/modules/test/
@@ -83,6 +94,17 @@ run_shim usr/lib/modules/test/
 [[ $(<"$modules/vmlinuz") == package-owned ]]
 SHIM_IMAGE_OWNER=linux-aarch64
 echo 'ok - a different kernel image owner prevents replacement'
+
+SHIM_DIR_OWNERS=linux-aarch64-headers
+run_shim usr/lib/modules/test/
+[[ $(<"$modules/vmlinuz") == package-owned ]]
+SHIM_DIR_OWNERS=$'linux-aarch64\nlinux-aarch64-headers'
+SHIM_IMAGE_OWNER=$'linux-aarch64\nlinux-aarch64-headers'
+run_shim usr/lib/modules/test/
+[[ $(<"$modules/vmlinuz") == package-owned ]]
+SHIM_DIR_OWNERS=linux-aarch64
+SHIM_IMAGE_OWNER=linux-aarch64
+echo 'ok - headers-only directories and ambiguous image ownership prevent replacement'
 
 (
   # shellcheck disable=SC2329 # Invoked by the shim in a child shell.

@@ -42,9 +42,13 @@ fi
 for dir in "${!DIRS[@]}"; do
 	[[ -d $dir ]] || continue
 	# Not a packaged kernel (a leftover or DKMS-only directory).
-	owner=$(owner_of "$dir") || continue
-	if [[ $(owner_of "$IMAGE") != "$owner" ]]; then
-		echo "$SELF: $owner owns $dir but not $IMAGE, leaving it alone" >&2
+	owners=$(owner_of "$dir") || continue
+	owner=$(owner_of "$IMAGE") || continue
+	# The kernel and its headers can both own the directory. Use the image's
+	# single owner, provided it is also one of the directory's owners.
+	[[ -n $owner && $owner != *$'\n'* ]] || continue
+	if ! printf '%s\n' "$owners" | grep -Fx -- "$owner" >/dev/null; then
+		echo "$SELF: $owner owns $IMAGE but not $dir, leaving it alone" >&2
 		continue
 	fi
 	# Preserve package-owned files; refresh metadata previously written by the shim.
