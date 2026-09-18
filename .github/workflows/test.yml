@@ -1,9 +1,11 @@
 name: Tests
 
+# PR-only. Publishing on push has its own workflow and is what verifies the
+# merged tree: it resolves every package against the live channel and refuses
+# a filename that already exists with different bytes, so two PRs cannot land
+# the same version twice. A post-merge test run would only repeat the PR's.
 on:
   pull_request:
-  push:
-    branches: [master]
   workflow_dispatch:
 
 jobs:
@@ -47,6 +49,9 @@ jobs:
               ./bin/omarchy-release self-test
               ./tests/partial-release.sh
               ./tests/published-build-plan.sh
+              ./tests/controller.sh
+              pacman -S --noconfirm --quiet rclone >/dev/null
+              ./tests/publish-artifact.sh
               shopt -s nullglob
               for test in pkgbuilds/*/test.sh; do
                 bash "$test"
