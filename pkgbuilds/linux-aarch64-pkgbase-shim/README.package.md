@@ -13,6 +13,9 @@ writes into each package-owned modules directory without native kernel metadata:
 
 Reinstalling a kernel refreshes the shim's copy when the image changes, even
 if the module-directory version is unchanged. Package-owned files are preserved.
+When the kernel and its headers share ownership of the module directory, the
+shim uses the owner of `/boot/Image`, after confirming that it also owns the
+directory. Headers-package ownership alone does not qualify a directory.
 
 It runs as `85-`, before `90-mkinitcpio-install`, so the usual hook then builds
 the initramfs/UKI and the Limine entry. If that hook would not run in the same
