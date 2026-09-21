@@ -83,13 +83,17 @@ jobs:
           cat plan.txt
 
       # Fetch each package's PR artifact into build-output/edge/<arch>/, or
-      # build it when no artifact exists for exactly this tree.
+      # build it when no artifact exists for exactly this tree. An artifact
+      # carries its package files inside packages.tar (see build-pr.yml and
+      # helpers/artifact-helpers.sh: the upload action rejects the colon in
+      # an epoch filename).
       - name: Collect artifacts
         env:
           GH_TOKEN: ${{ github.token }}
           CONTAINER_ENGINE: docker
         run: |
           set -uo pipefail
+          source helpers/artifact-helpers.sh
           # sources.jsonl: where each package's files came from, or that the
           # build failed. A failed build ends the run before any publish, and
           # the record says so instead of the report job finding nothing.
@@ -104,7 +108,10 @@ jobs:
             mkdir -p "build-output/edge/$arch"
             if [[ -n "$found" ]]; then
               echo "==> $label: PR artifact"
-              if curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -o /tmp/artifact.zip "$found" && unzip -oq /tmp/artifact.zip -d "build-output/edge/$arch"; then
+              rm -rf /tmp/artifact; mkdir -p /tmp/artifact
+              if curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -o /tmp/artifact.zip "$found" \
+                && unzip -oq /tmp/artifact.zip -d /tmp/artifact \
+                && unpack_packages /tmp/artifact "build-output/edge/$arch"; then
                 jq -nc --arg p "$package" --arg a "$arch" '{package:$p, arch:$a, source:"pr-artifact"}' >> sources.jsonl
               else
                 jq -nc --arg p "$package" --arg a "$arch" '{package:$p, arch:$a, source:"artifact-download-failed"}' >> sources.jsonl; failed=1; break

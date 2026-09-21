@@ -825,6 +825,45 @@ using real containers and pacman transactions. It uses the prepared builder
 image, or an image named by `TEST_BUILDER_IMAGE`; CI builds the small fixture
 image in `tests/build-isolation.Dockerfile`.
 
+### Daily builder images
+
+`Refresh builder images` builds fresh `edge` environments daily at 04:23 UTC,
+when their inputs change on `master`, and on manual dispatch. x86_64 and
+aarch64 build on native GitHub-hosted runners, without occupying the DO
+package-builder pool. Each candidate must pass `tests/build-isolation.sh`,
+including real package builds, before publication to
+`ghcr.io/omacom/omarchy-pkg-builder`. Only `master` in this repository can
+publish; PR workflows cannot replace the shared images.
+PRs that change image inputs also build and test both candidates on native
+runners, with a read-only token and no registry publication.
+
+The compatibility tag contains the architecture, mirror, and a hash of the
+entire `build/` context, including executable bits and symlink targets but
+excluding checkout timestamps and ownership. This deliberately invalidates
+images when mounted build scripts change too. `v1` identifies the image build
+contract; change it if the invocation or compatibility rules change. Each
+successful refresh also gets a run-specific tag for diagnosis and rollback.
+A failed build, isolation test, or push leaves the previous compatible image
+selected. Scheduled builds use `--pull --no-cache` so unchanged Dockerfiles
+still pick up fresh Arch packages.
+
+To build and test a candidate locally:
+
+```bash
+bin/builder-image key --arch x86_64 --mirror edge
+bin/builder-image build --arch x86_64 --mirror edge --tag builder-candidate:test --fresh
+CONTAINER_ENGINE=docker TEST_BUILDER_IMAGE=builder-candidate:test tests/build-isolation.sh
+```
+
+The workflow uses its repository `GITHUB_TOKEN` with `packages: write`; no
+registry PAT is needed. **First publication needs one package setting:** GHCR
+creates the package private. In the `omacom/omarchy-pkg-builder` package
+settings, change visibility to **Public**, then rerun the failed refresh job.
+The workflow checks anonymous registry access before advancing the compatible
+tag, so fork PRs will not be directed to an image they cannot pull. Subsequent
+refreshes preserve that package visibility. This change only produces images;
+package jobs keep their existing behavior until image consumption is enabled.
+
 ## Version Management
 
 Packages are only rebuilt if:
@@ -843,6 +882,22 @@ The repository includes GitHub workflows and systemd services for automated rele
 
 1. **sync-upstream.yml** (Every 6 hours): Watches direct upstream feeds and updates owned recipes. Successful package updates reach a PR even if another feed fails; failed recipes stay untouched and the workflow remains red.
 2. **sync-rebuilds.yml** (Every 6 hours): Bumps pkgrel for packages whose `rebuild_on` dependencies have moved in the official repositories and opens a PR.
+
+To approve builds for an unvouched contributor's PR, apply **`build-approved`**.
+Until approval, the PR shows **Awaiting build approval** and its required
+`result` check stays pending, keeping the PR blocked from merging without
+reporting a failed build. Actual build failures and denouncements still fail.
+Applying the label triggers a package build and automatically releases GitHub's
+pending build and test workflows for that PR's current commit. The approval workflow
+runs only trusted default-branch code; package builds and tests stay in the
+ordinary PR workflows. It may take a few minutes for GitHub to register and
+release all the runs.
+
+The label stays effective for that PR while attached, including later commits;
+it does not vouch for the author's other PRs. Removing it stops further label
+approvals, but does not cancel runs already released. An explicit denouncement
+in `.github/VOUCHED.td` still blocks builds. If the approval workflow times out,
+remove and reapply the label to retry.
 
 #### Systemd Services
 

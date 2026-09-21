@@ -32,6 +32,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Test PR workflow approval
+        run: node --test tests/pr-workflow-approval.cjs
+
+      - name: Test builder images
+        run: node --test tests/builder-image.cjs
+
       # An Arch container for vercmp: version ordering has to be decided by
       # the same comparator pacman uses on users' machines.
       - name: Run self-tests
@@ -42,6 +48,7 @@ jobs:
             archlinux:base-devel bash -lc '
               set -euo pipefail
               pacman -Syu --noconfirm git jq python python-yaml libarchive xz zstd
+              python tests/oma-service-removal.py
               python tests/upstream-watch.py
               ./bin/sync-upstream self-test
               ./bin/sync-rebuilds --self-test
@@ -50,6 +57,7 @@ jobs:
               ./tests/partial-release.sh
               ./tests/published-build-plan.sh
               ./tests/controller.sh
+              ./tests/artifact-helpers.sh
               pacman -S --noconfirm --quiet rclone >/dev/null
               ./tests/publish-artifact.sh
               shopt -s nullglob
