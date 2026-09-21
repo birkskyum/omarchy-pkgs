@@ -1,6 +1,6 @@
 pkgname=strata
-pkgver=0.18.0
-pkgrel=1
+pkgver=0.19.0
+pkgrel=2
 pkgdesc='Fast, keyboard-first file manager for modern Linux desktops'
 arch=('x86_64' 'aarch64')
 url='https://github.com/lgse/strata'
@@ -39,7 +39,7 @@ conflicts=('strata-git')
 options=('!debug' '!lto')
 
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('82cfa5701f537e53d235b30e9450e1fcd5f2e7ccfea64ba317941e8e8766094b')
+sha256sums=('51701930728625ce1d6394949a4b6b2705f0999fd08be87f1a26d900209d62e0')
 
 prepare() {
   cd "$pkgname-$pkgver"
@@ -69,7 +69,16 @@ build() {
 check() {
   cd "$pkgname-$pkgver"
 
-  export CARGO_TARGET_DIR=target
+  # Upstream's release profile is fat LTO with one codegen unit, which
+  # compiles the final crate on a single thread. That is the right trade
+  # for the binary users run, and build() keeps it. The test harness is a
+  # second compile of the same crate under the same profile, thrown away
+  # afterwards; build it in parallel, in its own target directory so the
+  # shipped binary is untouched. Measured on the x86_64 builder: 708 s
+  # serial, 223 s with thin LTO and 16 units.
+  export CARGO_TARGET_DIR=target-check
+  export CARGO_PROFILE_RELEASE_LTO=thin
+  export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
   export STRATA_BUILD_COMMIT
   STRATA_BUILD_COMMIT=$(<.build-commit)
   export STRATA_RELEASE_TAG="v$pkgver"
@@ -84,8 +93,22 @@ check() {
   rm -rf -- "$search_tmp"
   (( test_status == 0 )) || return "$test_status"
 
+  # restart_waiter_* run `sh -c 'while kill -0 "$1"; do sleep; done'` with
+  # the pid u32::MAX. Arch's sh is bash, and bash's kill builtin in POSIX
+  # mode prints "not a pid or valid job spec" for that number but exits 0,
+  # so the loop never ends and the job hits its 180-minute timeout.
+  # Upstream CI runs on Ubuntu, where sh is dash and rejects the number.
+  # Skip until upstream waits on a real pid.
+  local skip=(--skip services::search::tests:: --skip ui::settings::tests::restart_waiter_)
+  # ownership_probe_errors_disable_in_place_updates points the pacman path
+  # at a directory and expects Command::output() to fail. aarch64 builds
+  # run under QEMU user-mode emulation, where glibc's posix_spawn cannot
+  # observe the child's failed execve (natively it returns EACCES); the
+  # spawn "succeeds" with exit 127, the probe reads that as "not owned",
+  # and the assertion fails. Passes natively.
+  [[ $CARCH == aarch64 ]] && skip+=(--skip services::update_install::tests::ownership_probe_errors_disable_in_place_updates)
   cargo test --frozen --release --all-targets --all-features \
-    -- --test-threads=1 --skip services::search::tests::
+    -- --test-threads=1 "${skip[@]}"
 }
 
 package() {
