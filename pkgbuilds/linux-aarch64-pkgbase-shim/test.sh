@@ -106,6 +106,13 @@ SHIM_DIR_OWNERS=linux-aarch64
 SHIM_IMAGE_OWNER=linux-aarch64
 echo 'ok - headers-only directories and ambiguous image ownership prevent replacement'
 
+printf 'another-kernel\n' >"$modules/pkgbase"
+run_shim usr/lib/modules/test/ 2>"$scratch/warning"
+[[ $(<"$modules/vmlinuz") == package-owned ]]
+grep -Fq 'pkgbase does not name linux-aarch64' "$scratch/warning"
+printf 'linux-aarch64\n' >"$modules/pkgbase"
+echo 'ok - a pkgbase naming another package is reported and preserved'
+
 (
   # shellcheck disable=SC2329 # Invoked by the shim in a child shell.
   cp() { return 1; }

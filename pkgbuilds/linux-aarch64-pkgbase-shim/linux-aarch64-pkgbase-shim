@@ -55,6 +55,7 @@ for dir in "${!DIRS[@]}"; do
 	owner_of "$dir/pkgbase" >/dev/null && continue
 	owner_of "$dir/vmlinuz" >/dev/null && continue
 	if [[ -e $dir/pkgbase && $(<"$dir/pkgbase") != "$owner" ]]; then
+		echo "$SELF: $dir/pkgbase does not name $owner, leaving $dir alone" >&2
 		continue
 	fi
 	if [[ -f $dir/pkgbase ]] && cmp -s "$IMAGE" "$dir/vmlinuz"; then
