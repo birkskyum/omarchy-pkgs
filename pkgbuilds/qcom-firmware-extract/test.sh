@@ -89,6 +89,16 @@ run_extractor --stage "$scratch/identical" -d "$driver_store"
 [[ $(<"$scratch/identical/$firmware_path/duplicate.mbn") == one ]]
 echo "ok - differing variants require a unique match"
 
+# A name that matches another as a regular expression keeps its manifest line.
+printf 'first' >"$driver_store/matching/dotXmbn"
+printf 'second' >"$driver_store/matching/dot.mbn"
+printf '%s\0' "$firmware_path/dotXmbn" >"$node/firmware-name"
+run_extractor --install --no-rebuild -d "$driver_store"
+printf '%s\0' "$firmware_path/dot.mbn" >"$node/firmware-name"
+run_extractor --install --no-rebuild -d "$driver_store"
+[[ $(grep -c /dot "$scratch/root/var/lib/omarchy/qcom-firmware/manifest") == 2 ]]
+echo "ok - manifest updates match firmware names exactly"
+
 # A packaged zap shader still needs an initramfs entry when nothing is missing.
 printf '%s\0' "$firmware_path/qccdsp8380.mbn" >"$node/firmware-name"
 mkdir -p "$dt_root/gpu@0/zap-shader"

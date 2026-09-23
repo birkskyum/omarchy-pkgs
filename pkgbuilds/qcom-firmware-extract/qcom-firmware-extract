@@ -315,7 +315,7 @@ for i in "${!missing_names[@]}"; do
   install -Dm644 "$src" "$FW_ROOT/updates/$name"
   sum=$(sha256sum "$src" | cut -d' ' -f1)
   # Keep one line per firmware name.
-  grep -v "^$name " "$MANIFEST" >"$MANIFEST.new" || true
+  awk -v name="$name" '$1 != name' "$MANIFEST" >"$MANIFEST.new"
   printf '%s %s %s %s\n' "$name" "$sum" "$src" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$MANIFEST.new"
   mv "$MANIFEST.new" "$MANIFEST"
   log "installed $name"
