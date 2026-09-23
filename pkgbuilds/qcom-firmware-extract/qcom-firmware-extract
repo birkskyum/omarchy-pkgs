@@ -31,6 +31,7 @@ set -euo pipefail
 
 DT_ROOT=${QCOM_FW_DT_ROOT:-/sys/firmware/devicetree/base}
 FW_ROOT=${QCOM_FW_FIRMWARE_ROOT:-/usr/lib/firmware}
+KERNEL_CONFIG=${QCOM_FW_KERNEL_CONFIG:-/proc/config.gz}
 # Destination prefix for the installed-system paths (tests only).
 ROOT=${QCOM_FW_ROOT:-}
 STATE_DIR="$ROOT/var/lib/omarchy/qcom-firmware"
@@ -84,11 +85,22 @@ dt_firmware_names() {
     done
 }
 
-# The kernel searches every directory for plain firmware before trying zstd
-# and xz. gzip is not an automatic firmware-loader fallback.
+# The kernel tries plain firmware in every directory, then zstd and xz if built
+# with them. gzip is not an automatic firmware-loader fallback.
+firmware_suffixes=('' .zst .xz)
+if kernel_config=$(gzip -dc -- "$KERNEL_CONFIG" 2>/dev/null); then
+  firmware_suffixes=('')
+  if grep -qx 'CONFIG_FW_LOADER_COMPRESS_ZSTD=y' <<<"$kernel_config"; then
+    firmware_suffixes+=(.zst)
+  fi
+  if grep -qx 'CONFIG_FW_LOADER_COMPRESS_XZ=y' <<<"$kernel_config"; then
+    firmware_suffixes+=(.xz)
+  fi
+fi
+
 firmware_file() {
   local name=$1 dir ext
-  for ext in '' .zst .xz; do
+  for ext in "${firmware_suffixes[@]}"; do
     for dir in "$FW_ROOT/updates" "$FW_ROOT"; do
       if [[ -f "$dir/$name$ext" ]]; then
         printf '%s\n' "$dir/$name$ext"

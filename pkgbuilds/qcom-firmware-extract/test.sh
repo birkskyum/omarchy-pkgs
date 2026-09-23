@@ -22,6 +22,11 @@ stage="$scratch/stage"
 node="$dt_root/remoteproc@0"
 firmware_path="qcom/x1e80100/LENOVO/83ED"
 
+# Pin the kernel's firmware decompressors instead of reading /proc/config.gz.
+export QCOM_FW_KERNEL_CONFIG="$scratch/config.gz"
+set_kernel_config() { printf '%s\n' "$@" | gzip >"$QCOM_FW_KERNEL_CONFIG"; }
+set_kernel_config CONFIG_FW_LOADER_COMPRESS_ZSTD=y CONFIG_FW_LOADER_COMPRESS_XZ=y
+
 mkdir -p "$node" "$firmware_root/$firmware_path" \
   "$driver_store/wrong" "$driver_store/matching"
 printf '%s\0%s\0' \
@@ -114,6 +119,14 @@ for compression in zstd xz; do
   rm "$firmware_root/$zap.$suffix"
 done
 echo "ok - zstd and xz firmware are loadable and included in the initramfs"
+
+# Arch Linux ARM's kernel loads xz firmware but not zstd.
+set_kernel_config CONFIG_FW_LOADER_COMPRESS_XZ=y
+printf 'zap' | zstd -c >"$firmware_root/$zap.zst"
+[[ $(run_extractor --list-missing) == "$zap" ]]
+rm "$firmware_root/$zap.zst"
+set_kernel_config CONFIG_FW_LOADER_COMPRESS_ZSTD=y CONFIG_FW_LOADER_COMPRESS_XZ=y
+echo "ok - zstd firmware counts as missing when the kernel cannot load it"
 
 printf 'zap' | gzip >"$firmware_root/$zap.gz"
 [[ $(run_extractor --list-missing) == "$zap" ]]
