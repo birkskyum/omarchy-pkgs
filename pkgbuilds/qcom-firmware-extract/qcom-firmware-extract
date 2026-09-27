@@ -242,13 +242,25 @@ unique_candidate() {
   printf '%s\n' "$first"
 }
 
+# Windows can ship DSP device-tree images under another name: a device tree
+# may ask for adsp_dtb.mbn where Windows has adsp_dtbs.elf (e.g. Surface Pro 11).
+windows_firmware_names() {
+  printf '%s\n' "$1"
+  if [[ $1 == *_dtb.mbn ]]; then
+    printf '%s\n' "${1%_dtb.mbn}_dtbs.elf"
+  fi
+}
+
 # Require a companion match when several firmware variants exist.
 find_in_sources() {
-  local base=$1 node=$2 candidate
+  local base=$1 node=$2 candidate name
   local -a candidates=()
-  while IFS= read -r -d '' candidate; do
-    candidates+=("$candidate")
-  done < <(find "${sources[@]}" -type f -iname "$base" -print0 2>/dev/null)
+  while IFS= read -r name; do
+    while IFS= read -r -d '' candidate; do
+      candidates+=("$candidate")
+    done < <(find "${sources[@]}" -type f -iname "$name" -print0 2>/dev/null)
+    ((${#candidates[@]})) && break
+  done < <(windows_firmware_names "$base")
 
   ((${#candidates[@]})) || return 1
   if unique_candidate "${candidates[@]}"; then

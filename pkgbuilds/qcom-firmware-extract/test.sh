@@ -83,6 +83,25 @@ run_extractor --install --no-rebuild --stage-dir "$scratch/partial"
 [[ $(<"$firmware_root/updates/$firmware_path/cdsp_dtbs.elf") == matching-dtb ]]
 echo "ok - missing firmware does not abort staging or installation"
 
+# Windows names the Surface Pro 11's DSP device-tree images *_dtbs.elf.
+surface_path="qcom/x1e80100/microsoft/Denali"
+mkdir -p "$driver_store/surfacepro_ext_adsp8380"
+printf '%s\0' "$surface_path/adsp_dtb.mbn" >"$node/firmware-name"
+printf 'surface-adsp-dtb' >"$driver_store/surfacepro_ext_adsp8380/adsp_dtbs.elf"
+run_extractor --stage "$scratch/windows-name" -d "$driver_store"
+[[ $(<"$scratch/windows-name/$surface_path/adsp_dtb.mbn") == surface-adsp-dtb ]] || {
+  echo "not ok - extractor did not find a DSP device-tree image under its Windows name" >&2
+  exit 1
+}
+run_extractor --install --no-rebuild --stage-dir "$scratch/windows-name"
+[[ $(<"$firmware_root/updates/$surface_path/adsp_dtb.mbn") == surface-adsp-dtb ]]
+rm "$firmware_root/updates/$surface_path/adsp_dtb.mbn"
+printf 'exact-name' >"$driver_store/surfacepro_ext_adsp8380/adsp_dtb.mbn"
+run_extractor --stage "$scratch/exact-name" -d "$driver_store"
+[[ $(<"$scratch/exact-name/$surface_path/adsp_dtb.mbn") == exact-name ]]
+rm "$driver_store/surfacepro_ext_adsp8380/adsp_dtb.mbn"
+echo "ok - DSP device-tree images are found under their Windows names, exact names first"
+
 # With no companion, only byte-identical duplicates are safe to select.
 printf '%s\0' "$firmware_path/duplicate.mbn" >"$node/firmware-name"
 printf 'one' >"$driver_store/wrong/duplicate.mbn"

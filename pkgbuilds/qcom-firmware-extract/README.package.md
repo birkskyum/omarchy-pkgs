@@ -14,7 +14,9 @@ The device tree names every firmware file the kernel will ask for
 (`firmware-name` properties). The tool keeps the names that are missing under
 `/usr/lib/firmware{,/updates}`, finds each one by file name in
 `Windows/System32/DriverStore/FileRepository` on any NTFS partition it can
-mount read-only. If Windows carries several variants and linux-firmware has a
+mount read-only. A DSP device-tree image the device tree calls `*_dtb.mbn` is
+also found under its Windows name, `*_dtbs.elf`, when the exact name is
+missing. If Windows carries several variants and linux-firmware has a
 companion image from the same device-tree node, the sibling image's hash
 selects the compatible variant. Identical duplicates are accepted; differing
 variants without a unique companion match are skipped. The result is
