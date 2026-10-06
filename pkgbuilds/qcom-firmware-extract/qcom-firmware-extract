@@ -7,9 +7,10 @@
 #   --stage DIR       Live ISO, before the disk is touched: scan the Windows
 #                     partitions and save the missing files under DIR (the
 #                     installer copies DIR into the target). Missing firmware
-#                     is reported without aborting staging.
-#   --install         Installed system or the installer's chroot: take the
-#                     files from the stage (--stage-dir, default
+#                     is reported without aborting staging. A rerun adds the
+#                     files earlier runs did not find.
+#   --install         Installed system or the installer's chroot: take each
+#                     file from the stage (--stage-dir, default
 #                     /var/lib/omarchy/firmware-stage), else from a Windows
 #                     partition still on disk, write them under
 #                     /usr/lib/firmware/updates, record a manifest, add the
@@ -19,7 +20,8 @@
 #                     /usr/lib/firmware, one per line. Needs no root.
 #   -d DIR            Use DIR as the driver store (a Windows/System32/
 #                     DriverStore/FileRepository directory, or any directory
-#                     tree holding the files) instead of scanning partitions.
+#                     tree holding the files) instead of the Windows
+#                     partitions. --install then ignores the stage.
 #
 # Files land in /usr/lib/firmware/updates to avoid package ownership conflicts.
 #
@@ -32,8 +34,10 @@ set -euo pipefail
 DT_ROOT=${QCOM_FW_DT_ROOT:-/sys/firmware/devicetree/base}
 FW_ROOT=${QCOM_FW_FIRMWARE_ROOT:-/usr/lib/firmware}
 KERNEL_CONFIG=${QCOM_FW_KERNEL_CONFIG:-/proc/config.gz}
-# Destination prefix for the installed-system paths (tests only).
+# Destination prefix for the installed-system and mount paths (tests only).
 ROOT=${QCOM_FW_ROOT:-}
+# The effective user ID the root checks see (tests only).
+CHECKED_EUID=${QCOM_FW_TEST_EUID:-$EUID}
 STATE_DIR="$ROOT/var/lib/omarchy/qcom-firmware"
 MANIFEST="$STATE_DIR/manifest"
 INITCPIO_CONF="$ROOT/etc/mkinitcpio.conf.d/qcom-firmware.conf"
@@ -134,7 +138,7 @@ fi
 
 # Root is needed to write under /usr/lib/firmware (and, below, to mount
 # partitions); staging a -d driver store into a user directory needs neither.
-if ((EUID != 0)) && [[ $mode == install && -z $ROOT ]]; then
+if [[ $CHECKED_EUID != 0 && $mode == install ]]; then
   warn "must run as root"
   exit 1
 fi
@@ -143,8 +147,11 @@ fi
 # 2. Where can they come from?
 # ---------------------------------------------------------------------------
 
-declare -a sources=()   # directories to search, best first
+declare -a sources=()   # driver stores to search together (-d or Windows)
 declare -a mounts=()    # temporary mounts to undo
+stage_source=""         # the installer's stage, used before the driver stores
+declare -A manifest=()  # the manifest this run updates, lines by firmware name
+declare -A staged=()    # names the stage manifest lists
 cleanup() {
   local m
   for m in "${mounts[@]-}"; do
@@ -158,7 +165,7 @@ trap cleanup EXIT
 # Mount Windows driver stores read-only, preferring internal disks.
 scan_windows_partitions() {
   local dev fstype tran mp bitlocker=""
-  if ((EUID != 0)); then
+  if [[ $CHECKED_EUID != 0 ]]; then
     warn "must run as root to read the Windows partitions"
     exit 1
   fi
@@ -173,7 +180,7 @@ scan_windows_partitions() {
   done < <(lsblk -rpno PATH,FSTYPE,TRAN 2>/dev/null | awk 'NF>=2')
 
   for dev in "${internal[@]}" "${external[@]}"; do
-    mp=$(mktemp -d /run/qcom-firmware-extract.XXXXXX)
+    mp=$(mktemp -d "$ROOT/run/qcom-firmware-extract.XXXXXX")
     if mount -t ntfs3 -o ro,nosuid,nodev,noexec "$dev" "$mp" 2>/dev/null; then
       mounts+=("$mp")
       if [[ -d "$mp/$DRIVERSTORE_PATH" ]]; then
@@ -275,22 +282,103 @@ find_in_sources() {
   return 1
 }
 
+# A manifest has one line per firmware name: the name, the SHA-256 of the file
+# and where it came from. Loads FILE as the manifest this run updates.
+read_manifest() {
+  local line name
+  manifest=()
+  while IFS= read -r line || [[ -n $line ]]; do
+    read -r name _ <<<"$line"
+    if [[ -n $name ]]; then
+      manifest[$name]=$line
+    fi
+  done <"$1"
+}
+
+# Sets NAME's manifest line to NAME followed by FIELDS.
+set_manifest_line() {
+  local name=$1
+  shift
+  manifest[$name]="$name $*"
+}
+
+write_manifest() {
+  if ((${#manifest[@]})); then
+    printf '%s\n' "${manifest[@]}" | sort >"$1.new"
+  else
+    : >"$1.new"
+  fi
+  mv "$1.new" "$1"
+}
+
+# A file in DIR counts as staged when the stage manifest lists it. In --stage
+# mode, that manifest is also the one the run updates.
+use_stage() {
+  local name
+  stage_source=$1
+  read_manifest "$1/manifest"
+  for name in "${!manifest[@]}"; do
+    staged[$name]=1
+  done
+}
+
+is_staged() {
+  [[ -n ${staged[$1]-} && -f $stage_source/$1 ]]
+}
+
+# True if the stage lacks any of the missing files.
+stage_incomplete() {
+  local name
+  for name in "${missing_names[@]}"; do
+    is_staged "$name" || return 0
+  done
+  return 1
+}
+
+# The stage comes first; the driver stores supply what it lacks.
+locate_firmware() {
+  local name=$1 node=$2
+  if is_staged "$name"; then
+    printf '%s\n' "$stage_source/$name"
+    return 0
+  fi
+  ((${#sources[@]})) || return 1
+  find_in_sources "$(basename "$name")" "$node"
+}
+
 # ---------------------------------------------------------------------------
 # 3. Stage: live session, before the disk is written
 # ---------------------------------------------------------------------------
 
 if [[ $mode == stage ]]; then
+  # Files staged by an earlier run are kept; a rerun, for example with -d,
+  # looks only for the rest, so an empty or partial stage blocks nothing.
   if [[ -f "$stage_dir/manifest" ]]; then
+    use_stage "$stage_dir"
+  fi
+  if ! stage_incomplete; then
     log "already staged in $stage_dir"
     exit 0
   fi
-  if [[ -n $driverstore ]]; then sources=("$driverstore"); else scan_windows_partitions; fi
+  if [[ -n $driverstore ]]; then
+    sources=("$driverstore")
+  elif [[ -n $stage_source && $CHECKED_EUID != 0 ]]; then
+    # Without root the partitions cannot be read; keep the stage as it is.
+    log "already staged in $stage_dir; run as root to read the Windows partitions for the rest"
+    exit 0
+  else
+    scan_windows_partitions
+  fi
   mkdir -p "$stage_dir"
-  staged=0
-  : >"$stage_dir/manifest.partial"
+  copied=0
+  kept=0
   for i in "${!missing_names[@]}"; do
     node=${missing_nodes[$i]}
     name=${missing_names[$i]}
+    if is_staged "$name"; then
+      kept=$((kept + 1))
+      continue
+    fi
     src=""
     if ((${#sources[@]})); then
       src=$(find_in_sources "$(basename "$name")" "$node") || true
@@ -300,11 +388,11 @@ if [[ $mode == stage ]]; then
       continue
     fi
     install -Dm644 "$src" "$stage_dir/$name"
-    printf '%s %s %s\n' "$name" "$(sha256sum "$src" | cut -d' ' -f1)" "$src" >>"$stage_dir/manifest.partial"
-    staged=$((staged + 1))
+    set_manifest_line "$name" "$(sha256sum "$src" | cut -d' ' -f1)" "$src"
+    copied=$((copied + 1))
   done
-  mv "$stage_dir/manifest.partial" "$stage_dir/manifest"
-  log "staged $staged of ${#missing_names[@]} firmware files in $stage_dir"
+  write_manifest "$stage_dir/manifest"
+  log "staged $copied of ${#missing_names[@]} firmware files in $stage_dir ($kept already staged)"
   exit 0
 fi
 
@@ -315,33 +403,34 @@ fi
 [[ -n $stage_dir ]] || stage_dir=$DEFAULT_STAGE_DIR
 if [[ -n $driverstore ]]; then
   sources=("$driverstore")
-elif [[ -f "$stage_dir/manifest" ]]; then
-  log "using the firmware staged by the installer in $stage_dir"
-  sources=("$stage_dir")
-elif ((${#missing_names[@]})); then
-  scan_windows_partitions
+else
+  # Windows supplies what the stage lacks, so a stage never hides it.
+  if [[ -f "$stage_dir/manifest" ]]; then
+    log "using the firmware staged by the installer in $stage_dir"
+    use_stage "$stage_dir"
+  fi
+  if stage_incomplete; then
+    scan_windows_partitions
+  fi
 fi
 
 mkdir -p "$STATE_DIR"
 touch "$MANIFEST"
+read_manifest "$MANIFEST"
 installed=0
 for i in "${!missing_names[@]}"; do
   node=${missing_nodes[$i]}
   name=${missing_names[$i]}
-  src=""
-  if ((${#sources[@]})); then
-    src=$(find_in_sources "$(basename "$name")" "$node") || true
-  fi
+  src=$(locate_firmware "$name" "$node") || true
   if [[ -z $src ]]; then
     warn "not found: $name"
     continue
   fi
   install -Dm644 "$src" "$FW_ROOT/updates/$name"
-  sum=$(sha256sum "$src" | cut -d' ' -f1)
-  # Keep one line per firmware name.
-  awk -v name="$name" '$1 != name' "$MANIFEST" >"$MANIFEST.new"
-  printf '%s %s %s %s\n' "$name" "$sum" "$src" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$MANIFEST.new"
-  mv "$MANIFEST.new" "$MANIFEST"
+  # Record each file as soon as it is in place.
+  set_manifest_line "$name" "$(sha256sum "$src" | cut -d' ' -f1)" "$src" \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  write_manifest "$MANIFEST"
   log "installed $name"
   installed=$((installed + 1))
 done

@@ -54,10 +54,12 @@ QCOM_FW_DT_ROOT="$dt_root" \
 
 echo "ok - extractor selects an ambiguous DTB by its companion firmware hash"
 
+# Runs under a test root prefix, as if root.
 run_extractor() {
   QCOM_FW_DT_ROOT="$dt_root" \
     QCOM_FW_FIRMWARE_ROOT="$firmware_root" \
     QCOM_FW_ROOT="$scratch/root" \
+    QCOM_FW_TEST_EUID=0 \
     PATH="$test_bin:$PATH" \
     bash "$extractor" "$@"
 }
@@ -179,3 +181,157 @@ rm "$scratch/root/etc/mkinitcpio.conf.d/qcom-firmware.conf"
 run_extractor --install -d "$driver_store"
 [[ $(<"$scratch/root/rebuilds") == rebuild ]]
 echo "ok - configuration-only changes rebuild the initramfs once"
+
+# Reruns: an earlier stage, even an empty one, must not hide a later source.
+rerun="$scratch/rerun"
+rerun_dt="$rerun/device-tree"
+adsp="qcom/glymur/vendor/board/qcadsp.mbn"
+dtb="qcom/glymur/vendor/board/adsp_dtbs.elf"
+windows_store="$rerun/windows/nvme0n1p3/Windows/System32/DriverStore/FileRepository/adsp.inf_1"
+mkdir -p "$rerun_dt/remoteproc@0" "$rerun/root/run" "$rerun/empty-store" \
+  "$rerun/store" "$rerun/adsp-only-store" "$windows_store"
+printf '%s\0%s\0' "$adsp" "$dtb" >"$rerun_dt/remoteproc@0/firmware-name"
+printf 'store-adsp' >"$rerun/store/qcadsp.mbn"
+printf 'store-dtb' >"$rerun/store/adsp_dtbs.elf"
+printf 'first-adsp' >"$rerun/adsp-only-store/qcadsp.mbn"
+printf 'windows-adsp' >"$windows_store/qcadsp.mbn"
+printf 'windows-dtb' >"$windows_store/adsp_dtbs.elf"
+
+# shellcheck disable=SC2329 # The stubs are exported to the extractor.
+(
+  # One internal NTFS partition holding the fake Windows tree.
+  lsblk() { printf 'lsblk\n' >>"$TEST_SCAN_LOG"; printf '/dev/nvme0n1p3 ntfs nvme\n'; }
+  mount() { local device=${*: -2:1} mount_point=${*: -1}; cp -R "$TEST_WINDOWS/${device##*/}/." "$mount_point/"; }
+  umount() { find "$1" -mindepth 1 -delete; }
+  export -f lsblk mount umount
+  export TEST_WINDOWS="$rerun/windows" TEST_SCAN_LOG="$rerun/scan.log"
+
+  run_rerun() {
+    QCOM_FW_DT_ROOT="$rerun_dt" \
+      QCOM_FW_FIRMWARE_ROOT="$rerun/firmware" \
+      QCOM_FW_ROOT="$rerun/root" \
+      QCOM_FW_TEST_EUID=${QCOM_FW_TEST_EUID-0} \
+      PATH="$test_bin:$PATH" \
+      bash "$extractor" "$@"
+  }
+  reset_installed() { rm -rf "$rerun/firmware" "$rerun/root/var" "$TEST_SCAN_LOG"; mkdir -p "$rerun/firmware"; }
+  installed() { cat "$rerun/firmware/updates/$1"; }
+
+  stage="$rerun/stage"
+  run_rerun --stage "$stage" -d "$rerun/empty-store"
+  [[ -f $stage/manifest && ! -s $stage/manifest ]]
+  run_rerun --stage "$stage" -d "$rerun/store"
+  [[ $(<"$stage/$adsp") == store-adsp && $(<"$stage/$dtb") == store-dtb ]]
+  [[ $(grep -c . "$stage/manifest") == 2 ]]
+  output=$(run_rerun --stage "$stage")
+  [[ $output == *"already staged"* ]]
+  [[ ! -e $TEST_SCAN_LOG ]]
+  echo "ok - a stage rerun adds files an earlier, empty stage lacked"
+
+  partial="$rerun/partial-stage"
+  run_rerun --stage "$partial" -d "$rerun/adsp-only-store"
+  run_rerun --stage "$partial" -d "$rerun/store"
+  [[ $(<"$partial/$adsp") == first-adsp && $(<"$partial/$dtb") == store-dtb ]]
+  [[ $(grep -c "^$adsp " "$partial/manifest") == 1 && $(grep -c . "$partial/manifest") == 2 ]]
+  echo "ok - a stage rerun keeps staged files and their manifest lines"
+
+  # Only the test switch stands in for root, not the test path prefix.
+  rm -f "$TEST_SCAN_LOG"
+  if output=$(QCOM_FW_TEST_EUID=1000 run_rerun --stage "$rerun/user-stage" 2>&1); then
+    echo "not ok - a first stage without root read the partitions" >&2
+    exit 1
+  fi
+  [[ $output == *"must run as root to read the Windows partitions"* && ! -e $TEST_SCAN_LOG ]]
+  if QCOM_FW_TEST_EUID=1000 run_rerun --install --no-rebuild -d "$rerun/store" >/dev/null 2>&1; then
+    echo "not ok - an install without root went ahead" >&2
+    exit 1
+  fi
+  echo "ok - reading the partitions and installing need root"
+
+  # A rerun without root cannot read Windows, so it keeps the stage it has.
+  user_partial="$rerun/user-partial"
+  run_rerun --stage "$user_partial" -d "$rerun/adsp-only-store"
+  output=$(QCOM_FW_TEST_EUID=1000 run_rerun --stage "$user_partial")
+  [[ $output == *"already staged in $user_partial; run as root"* && ! -e $TEST_SCAN_LOG ]]
+  [[ $(grep -c . "$user_partial/manifest") == 1 ]]
+  echo "ok - a stage rerun without root keeps a partial stage and succeeds"
+
+  # Neither a stage rerun nor an install reads or rewrites the stage manifest
+  # once per firmware name. External commands naming it are counted; reads
+  # with bash builtins are not.
+  probe="$rerun/probe-stage"
+  run_rerun --stage "$probe" -d "$rerun/adsp-only-store"
+  (
+    # shellcheck disable=SC2329 # The wrappers are exported to the extractor.
+    manifest_access() {
+      local tool=$1 arg
+      shift
+      for arg; do
+        if [[ $arg == "$probe/manifest"* ]]; then
+          printf '%s\n' "$tool" >>"$rerun/manifest.log"
+          break
+        fi
+      done
+      command "$tool" "$@"
+    }
+    awk() { manifest_access awk "$@"; }
+    cat() { manifest_access cat "$@"; }
+    cp() { manifest_access cp "$@"; }
+    grep() { manifest_access grep "$@"; }
+    mv() { manifest_access mv "$@"; }
+    sed() { manifest_access sed "$@"; }
+    export -f manifest_access awk cat cp grep mv sed
+    export probe rerun
+
+    run_rerun --stage "$probe" -d "$rerun/store"
+    [[ $(<"$probe/$dtb") == store-dtb && $(command grep -c . "$rerun/manifest.log") -le 1 ]]
+    rm "$rerun/manifest.log"
+    reset_installed
+    run_rerun --install --no-rebuild --stage-dir "$probe"
+    [[ $(installed "$adsp") == first-adsp && $(installed "$dtb") == store-dtb ]]
+    [[ ! -e $rerun/manifest.log || $(command grep -c . "$rerun/manifest.log") -le 1 ]]
+  )
+  echo "ok - no per-name stage manifest scans or rewrites"
+
+  mkdir -p "$rerun/empty-stage"
+  : >"$rerun/empty-stage/manifest"
+  reset_installed
+  run_rerun --install --no-rebuild --stage-dir "$rerun/empty-stage"
+  [[ $(installed "$adsp") == windows-adsp && $(installed "$dtb") == windows-dtb ]]
+  echo "ok - an empty stage does not hide the Windows partition"
+
+  dtb_stage="$rerun/dtb-stage"
+  mkdir -p "$dtb_stage/${dtb%/*}"
+  printf 'staged-dtb' >"$dtb_stage/$dtb"
+  printf '%s %s %s\n' "$dtb" 0 test >"$dtb_stage/manifest"
+  reset_installed
+  run_rerun --install --no-rebuild --stage-dir "$dtb_stage"
+  [[ $(installed "$dtb") == staged-dtb && $(installed "$adsp") == windows-adsp ]]
+  echo "ok - Windows supplies what a partial stage lacks, and the stage comes first"
+
+  reset_installed
+  run_rerun --install --no-rebuild --stage-dir "$stage"
+  [[ $(installed "$adsp") == store-adsp && $(installed "$dtb") == store-dtb ]]
+  [[ ! -e $TEST_SCAN_LOG ]]
+  echo "ok - a complete stage is used without mounting Windows"
+
+  printf 'unlisted' >"$dtb_stage/$adsp"
+  reset_installed
+  run_rerun --install --no-rebuild --stage-dir "$dtb_stage"
+  [[ $(installed "$adsp") == windows-adsp ]]
+  echo "ok - only files recorded in the stage manifest count as staged"
+
+  # A manifest line whose file is gone does not count as staged either.
+  rm "$dtb_stage/$dtb"
+  reset_installed
+  run_rerun --install --no-rebuild --stage-dir "$dtb_stage"
+  [[ $(installed "$dtb") == windows-dtb ]]
+  printf 'staged-dtb' >"$dtb_stage/$dtb"
+  echo "ok - a manifest line without its file does not count as staged"
+
+  reset_installed
+  run_rerun --install --no-rebuild --stage-dir "$stage" -d "$rerun/adsp-only-store"
+  [[ $(installed "$adsp") == first-adsp && ! -e $rerun/firmware/updates/$dtb ]]
+  [[ ! -e $TEST_SCAN_LOG ]]
+  echo "ok - -d replaces the stage and the Windows partitions"
+)

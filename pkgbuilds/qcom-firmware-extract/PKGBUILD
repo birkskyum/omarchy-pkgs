@@ -4,7 +4,7 @@
 
 pkgname=qcom-firmware-extract
 pkgver=1
-pkgrel=4
+pkgrel=5
 pkgdesc="Copy vendor-signed Qualcomm Snapdragon firmware from the machine's Windows installation"
 arch=('any')
 url="https://github.com/omacom/omarchy-pkgs"

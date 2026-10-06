@@ -34,16 +34,19 @@ ships gets nothing copied; a machine without a device tree exits at once.
 - **Installer, live session:** `qcom-firmware-extract --stage DIR` right
   after the disk is chosen, before anything is written. A full-disk install
   destroys the Windows partition the files come from, so this is the only
-  moment they can be read. The stage is copied into the target.
+  moment they can be read. The stage is copied into the target. Running
+  `--stage` again, for example with `-d`, adds the files earlier runs did
+  not find.
 - **Installer, hardware setup:** `qcom-firmware-extract --install --no-rebuild`
-  from `install/hardware/qualcomm/firmware.sh`, using the stage
-  (or a Windows partition still on disk). The installer builds the boot image
-  once afterwards.
-- **Installed system:** `sudo qcom-firmware-extract` scans the disks again,
-  or `sudo qcom-firmware-extract -d /path/to/FileRepository` takes any driver
-  store you can mount (a Windows install of the *same model*: the files are
-  tied to the vendor's signing keys). It rebuilds the boot image; reboot
-  afterwards.
+  from `install/hardware/qualcomm/firmware.sh`. Each file comes from the stage
+  if it holds one, otherwise from a Windows partition still on disk. The
+  installer builds the boot image once afterwards.
+- **Installed system:** `sudo qcom-firmware-extract` uses the stage and scans
+  the disks again for what it lacks; when nothing is missing, it does not
+  touch the disks. `sudo qcom-firmware-extract -d /path/to/FileRepository`
+  instead takes any driver store you can mount (a Windows install of the
+  *same model*: the files are tied to the vendor's signing keys). It rebuilds
+  the boot image; reboot afterwards.
 
 BitLocker volumes cannot be read; turn BitLocker off in Windows first.
 
