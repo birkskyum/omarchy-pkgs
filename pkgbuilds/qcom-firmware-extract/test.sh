@@ -197,17 +197,26 @@ printf 'first-adsp' >"$rerun/adsp-only-store/qcadsp.mbn"
 printf 'windows-adsp' >"$windows_store/qcadsp.mbn"
 printf 'windows-dtb' >"$windows_store/adsp_dtbs.elf"
 
+# For a subshell: one internal NTFS partition holding the fake Windows tree
+# $1/nvme0n1p3. The disk listing and each mount are recorded in $2.
 # shellcheck disable=SC2329 # The stubs are exported to the extractor.
-(
-  # One internal NTFS partition holding the fake Windows tree.
+stub_windows_partition() {
   lsblk() {
     printf 'lsblk\n' >>"$TEST_SCAN_LOG"
     [[ -n ${TEST_NO_WINDOWS-} ]] || printf '/dev/nvme0n1p3 ntfs nvme\n'
   }
-  mount() { local device=${*: -2:1} mount_point=${*: -1}; cp -R "$TEST_WINDOWS/${device##*/}/." "$mount_point/"; }
+  mount() {
+    local device=${*: -2:1} mount_point=${*: -1}
+    printf 'mount %s\n' "$device" >>"$TEST_SCAN_LOG"
+    cp -R "$TEST_WINDOWS/${device##*/}/." "$mount_point/"
+  }
   umount() { find "$1" -mindepth 1 -delete; }
   export -f lsblk mount umount
-  export TEST_WINDOWS="$rerun/windows" TEST_SCAN_LOG="$rerun/scan.log"
+  export TEST_WINDOWS=$1 TEST_SCAN_LOG=$2
+}
+
+(
+  stub_windows_partition "$rerun/windows" "$rerun/scan.log"
 
   run_rerun() {
     QCOM_FW_DT_ROOT="$rerun_dt" \
@@ -264,8 +273,8 @@ printf 'windows-dtb' >"$windows_store/adsp_dtbs.elf"
   # with bash builtins are not.
   probe="$rerun/probe-stage"
   run_rerun --stage "$probe" -d "$rerun/adsp-only-store"
+  # shellcheck disable=SC2329 # The wrappers are exported to the extractor.
   (
-    # shellcheck disable=SC2329 # The wrappers are exported to the extractor.
     manifest_access() {
       local tool=$1 arg
       shift
@@ -497,3 +506,74 @@ printf 'store-router' >"$board_updates/$router"
 install_listed_router
 rm "$board_updates/$router"
 echo "ok - a listed name's earlier copy is left in place and no longer recorded"
+
+# A board also lists names nothing in Windows should supply: SOCCP firmware
+# the machine's boot firmware loads before Linux, which no driver store holds,
+# and a CDSP image the board holds back although Windows and the stage have it.
+soccp="qcom/glymur/vendor/board/soccp.mbn"
+soccp_dtb="qcom/glymur/vendor/board/soccp_dtb.mbn"
+cdsp="qcom/glymur/vendor/board/qccdsp.mbn"
+cdsp_dtb="qcom/glymur/vendor/board/cdsp_dtbs.elf"
+board_store="$board/windows/nvme0n1p3/Windows/System32/DriverStore/FileRepository"
+mkdir -p "$board_dt/remoteproc@1" "$board_dt/remoteproc@2" "$board/root/run" \
+  "$board_store/cdsp.inf_1" "$board_store/adsp.inf_1"
+printf '%s\0%s\0' "$soccp" "$soccp_dtb" >"$board_dt/remoteproc@1/firmware-name"
+printf '%s\0%s\0' "$cdsp" "$cdsp_dtb" >"$board_dt/remoteproc@2/firmware-name"
+printf 'windows-cdsp' >"$board_store/cdsp.inf_1/qccdsp.mbn"
+printf 'windows-cdsp-dtb' >"$board_store/cdsp.inf_1/cdsp_dtbs.elf"
+printf 'windows-adsp' >"$board_store/adsp.inf_1/qcadsp.mbn"
+printf '%s\n' "# Loaded by the boot firmware." "$soccp" "$soccp_dtb" \
+  "# Not tested on this board." "$cdsp" "$cdsp_dtb" >>"$board_list"
+cdsp_stage="$board/cdsp-stage"
+mkdir -p "$cdsp_stage/${cdsp%/*}"
+printf 'staged-cdsp' >"$cdsp_stage/$cdsp"
+printf 'staged-cdsp-dtb' >"$cdsp_stage/$cdsp_dtb"
+printf '%s 0 test\n%s 0 test\n' "$cdsp" "$cdsp_dtb" >"$cdsp_stage/manifest"
+
+(
+  stub_windows_partition "$board/windows" "$board/scan.log"
+
+  [[ -z $(run_board --list-missing) ]]
+  output=$(run_board --stage "$board/later-stage")
+  [[ $output == *"already installed or listed for this board"* && ! -e $board/later-stage ]]
+  output=$(run_board --install --no-rebuild)
+  [[ $output == *"skipping $soccp: listed in $board_list"* ]]
+  run_board --install --no-rebuild --stage-dir "$cdsp_stage"
+  [[ ! -e $TEST_SCAN_LOG ]]
+  [[ ! -e $board_updates/$soccp && ! -e $board_updates/$cdsp && ! -e $board_updates/$cdsp_dtb ]]
+  echo "ok - with only listed names left, nothing reads the disks or installs them"
+
+  # Control: without the list, the same machine looks for them on the disks.
+  mv "$board_list" "$board/list.off"
+  [[ $(run_board --list-missing | grep -c .) == 5 ]]
+  run_board --install --no-rebuild --stage-dir "$cdsp_stage"
+  grep -qx lsblk "$TEST_SCAN_LOG"
+  grep -qx 'mount /dev/nvme0n1p3' "$TEST_SCAN_LOG"
+  [[ $(<"$board_updates/$cdsp") == staged-cdsp ]]
+  echo "ok - without the list, the same machine scans the disks for them (control)"
+
+  # Listing them again, without a scan, stops recording the copies that run
+  # installed and leaves them in place with a note.
+  mv "$board/list.off" "$board_list"
+  rm "$TEST_SCAN_LOG"
+  output=$(run_board --install --no-rebuild --stage-dir "$cdsp_stage")
+  [[ ! -e $TEST_SCAN_LOG ]]
+  [[ $(<"$board_updates/$cdsp") == staged-cdsp && $(<"$board_updates/$cdsp_dtb") == staged-cdsp-dtb ]]
+  [[ $output == *"note: an earlier run installed $board_updates/$cdsp,"* ]]
+  [[ $output == *"note: an earlier run installed $board_updates/$cdsp_dtb,"* ]]
+  if grep -qe "^$cdsp " -e "^$cdsp_dtb " "$board_manifest"; then
+    echo "not ok - listed names are still recorded as installed" >&2
+    exit 1
+  fi
+  # The board package or the user removes them.
+  rm "$board_updates/$cdsp" "$board_updates/$cdsp_dtb"
+  echo "ok - listing the names again leaves the copies that run installed, unrecorded"
+
+  # Something else missing still sends the extractor to Windows, for it alone.
+  rm "$board_updates/$adsp"
+  run_board --install --no-rebuild --stage-dir "$cdsp_stage"
+  grep -qx lsblk "$TEST_SCAN_LOG"
+  [[ $(<"$board_updates/$adsp") == windows-adsp ]]
+  [[ ! -e $board_updates/$soccp && ! -e $board_updates/$cdsp && ! -e $board_updates/$cdsp_dtb ]]
+  echo "ok - while Windows is read for other firmware, listed names are not installed"
+)
