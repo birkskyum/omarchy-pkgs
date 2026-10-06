@@ -311,7 +311,8 @@ windows_firmware_names() {
   fi
 }
 
-# Require a companion match when several firmware variants exist.
+# Require a companion match when several firmware variants exist. Returns 1
+# when the sources have no candidate and 2 when it refuses ambiguous ones.
 find_in_sources() {
   local base=$1 node=$2 candidate name
   local -a candidates=()
@@ -332,7 +333,7 @@ find_in_sources() {
   fi
 
   warn "refusing ambiguous $base: no unique variant matches its installed companion firmware"
-  return 1
+  return 2
 }
 
 # A manifest has one line per firmware name: the name, the SHA-256 of the file
@@ -393,15 +394,30 @@ stage_incomplete() {
   return 1
 }
 
-# The stage comes first; the driver stores supply what it lacks.
+# The stage comes first; the driver stores supply what it lacks. A staged file
+# listed under another device-tree path with the same file name (a later device
+# tree may move it) is the last resort, since after a full-disk install the
+# stage is the only copy.
 locate_firmware() {
-  local name=$1 node=$2
+  local name=$1 node=$2 src status=0
   if is_staged "$name"; then
     printf '%s\n' "$stage_source/$name"
     return 0
   fi
-  ((${#sources[@]})) || return 1
-  find_in_sources "$(basename "$name")" "$node"
+  if ((${#sources[@]})); then
+    src=$(find_in_sources "$(basename "$name")" "$node") || status=$?
+    if ((status == 0)); then
+      printf '%s\n' "$src"
+      return 0
+    fi
+    # The stage does not override a refusal of ambiguous variants.
+    ((status != 2)) || return 1
+  fi
+  [[ -n $stage_source ]] || return 1
+  local -a sources=("$stage_source")
+  src=$(find_in_sources "$(basename "$name")" "$node") || return 1
+  is_staged "${src#"$stage_source"/}" || return 1
+  printf '%s\n' "$src"
 }
 
 # ---------------------------------------------------------------------------

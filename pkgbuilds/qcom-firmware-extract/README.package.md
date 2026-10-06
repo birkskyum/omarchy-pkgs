@@ -67,8 +67,10 @@ so a listed ADSP image would bypass the check.
   not find.
 - **Installer, hardware setup:** `qcom-firmware-extract --install --no-rebuild`
   from `install/hardware/qualcomm/firmware.sh`. Each file comes from the stage
-  if it holds one, otherwise from a Windows partition still on disk. The
-  installer builds the boot image once afterwards.
+  if it holds one, otherwise from a Windows partition still on disk. A staged
+  file that a later device tree names under another path is found by file
+  name, after Windows, unless Windows held variants it refused as
+  ambiguous. The installer builds the boot image once afterwards.
 - **Installed system:** `sudo qcom-firmware-extract` uses the stage and scans
   the disks again for what it lacks; when nothing is missing, it does not
   touch the disks. `sudo qcom-firmware-extract -d /path/to/FileRepository`

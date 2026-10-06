@@ -200,7 +200,10 @@ printf 'windows-dtb' >"$windows_store/adsp_dtbs.elf"
 # shellcheck disable=SC2329 # The stubs are exported to the extractor.
 (
   # One internal NTFS partition holding the fake Windows tree.
-  lsblk() { printf 'lsblk\n' >>"$TEST_SCAN_LOG"; printf '/dev/nvme0n1p3 ntfs nvme\n'; }
+  lsblk() {
+    printf 'lsblk\n' >>"$TEST_SCAN_LOG"
+    [[ -n ${TEST_NO_WINDOWS-} ]] || printf '/dev/nvme0n1p3 ntfs nvme\n'
+  }
   mount() { local device=${*: -2:1} mount_point=${*: -1}; cp -R "$TEST_WINDOWS/${device##*/}/." "$mount_point/"; }
   umount() { find "$1" -mindepth 1 -delete; }
   export -f lsblk mount umount
@@ -334,6 +337,38 @@ printf 'windows-dtb' >"$windows_store/adsp_dtbs.elf"
   [[ $(installed "$adsp") == first-adsp && ! -e $rerun/firmware/updates/$dtb ]]
   [[ ! -e $TEST_SCAN_LOG ]]
   echo "ok - -d replaces the stage and the Windows partitions"
+
+  # After a full-disk install the stage is the only copy, even when a later
+  # device tree names a staged image under another path.
+  moved="$rerun/moved-stage"
+  old_adsp="qcom/glymur/vendor/old-board/qcadsp.mbn"
+  mkdir -p "$moved/${old_adsp%/*}" "$moved/${dtb%/*}"
+  printf 'moved-adsp' >"$moved/$old_adsp"
+  printf 'staged-dtb' >"$moved/$dtb"
+  printf '%s 0 test\n%s 0 test\n' "$old_adsp" "$dtb" >"$moved/manifest"
+  reset_installed
+  run_rerun --install --no-rebuild --stage-dir "$moved"
+  [[ $(installed "$adsp") == windows-adsp && $(installed "$dtb") == staged-dtb ]]
+  reset_installed
+  TEST_NO_WINDOWS=1 run_rerun --install --no-rebuild --stage-dir "$moved"
+  [[ -s $TEST_SCAN_LOG ]]
+  [[ $(installed "$adsp") == moved-adsp && $(installed "$dtb") == staged-dtb ]]
+  printf '%s 0 test\n' "$dtb" >"$moved/manifest"
+  reset_installed
+  TEST_NO_WINDOWS=1 run_rerun --install --no-rebuild --stage-dir "$moved"
+  [[ ! -e $rerun/firmware/updates/$adsp ]]
+  echo "ok - a staged file under an older device-tree path is used after Windows"
+
+  # The stage does not override Windows refusing ambiguous variants.
+  mkdir -p "${windows_store%_1}_2"
+  printf 'other-adsp' >"${windows_store%_1}_2/qcadsp.mbn"
+  printf '%s 0 test\n%s 0 test\n' "$old_adsp" "$dtb" >"$moved/manifest"
+  reset_installed
+  run_rerun --install --no-rebuild --stage-dir "$moved" 2>"$rerun/warnings"
+  grep -Fq "refusing ambiguous qcadsp.mbn" "$rerun/warnings"
+  [[ ! -e $rerun/firmware/updates/$adsp && $(installed "$dtb") == staged-dtb ]]
+  rm -r "${windows_store%_1}_2"
+  echo "ok - a staged file by name does not replace a refused ambiguous match"
 )
 
 # A board package can list firmware names that must not come from Windows.
