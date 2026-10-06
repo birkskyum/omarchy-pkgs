@@ -29,6 +29,34 @@ where, and its checksum is recorded in
 Nothing is model-specific. A laptop whose firmware linux-firmware already
 ships gets nothing copied; a machine without a device tree exits at once.
 
+## Firmware that does not come from Windows
+
+Some boards name firmware that must not be copied from Windows. The board
+package may handle it itself, for example by processing a vendor driver file
+or by holding back an image not yet tested on that board. Or the machine's
+own boot firmware loads it before Linux starts, and Windows drivers do not
+carry it as a file. The board package lists such names, one per line, in
+`/usr/share/qcom-firmware-extract/provided.d/<compatible>.list`, where
+`<compatible>` is one of the board's device-tree compatible strings. Blank
+lines are ignored, and a `#` at the start of a line or after a space starts
+a comment. An entry with a space inside, or a list that cannot be read, is
+skipped with a warning. On that board, listed names are never searched for,
+installed or reported missing, even when Windows or the stage holds a copy;
+everything else is handled as usual.
+
+A copy that an earlier `--install` put in `/usr/lib/firmware/updates` before
+the name was listed stays there, and while it does, it loads before any other
+copy. The tool never deletes it: matching bytes would not prove that the file
+is still the one it installed, since a board's own tool may keep the same file
+at that path. The next `--install` stops recording it in the manifest and
+prints its path, so the board package, or the user, can remove it.
+
+Because `--list-missing` leaves listed names out, a board must not list
+firmware that a hardware check relies on unless its package installs that
+firmware before the check runs. Omarchy's `install/hardware/qualcomm/firmware.sh`
+looks for `adsp` in that output to decide whether to keep the DSP driver off,
+so a listed ADSP image would bypass the check.
+
 ## When it runs
 
 - **Installer, live session:** `qcom-firmware-extract --stage DIR` right

@@ -17,13 +17,27 @@
 #                     zap shader to the initramfs, and rebuild the boot image
 #                     (unless --no-rebuild). This is the default mode.
 #   --list-missing    Print the device-tree firmware names not present under
-#                     /usr/lib/firmware, one per line. Needs no root.
+#                     /usr/lib/firmware and not listed for this board (below),
+#                     one per line. Needs no root.
 #   -d DIR            Use DIR as the driver store (a Windows/System32/
 #                     DriverStore/FileRepository directory, or any directory
 #                     tree holding the files) instead of the Windows
 #                     partitions. --install then ignores the stage.
 #
 # Files land in /usr/lib/firmware/updates to avoid package ownership conflicts.
+#
+# A board package lists named firmware that must not come from Windows on its
+# board, one name per line, in /usr/share/qcom-firmware-extract/provided.d/
+# <device-tree compatible>.list: files the package handles itself, and files
+# the machine's own boot firmware loads before Linux starts. Names listed
+# for one of this machine's compatibles are never searched for, installed or
+# reported missing. When nothing else is missing, the disks are not touched.
+# A copy that an earlier run installed before the name was listed is left in
+# place; the next --install stops recording it and prints where it is. Since
+# --list-missing leaves them out, a board must not list firmware that a
+# hardware check relies on, such as the ADSP image Omarchy checks before it
+# enables the DSP driver, unless its package installs that file before the
+# check runs.
 #
 # Derived from Canonical's qcom-firmware-extract (Tobias Heider, GPL-2+):
 # https://salsa.debian.org/debian/qcom-firmware-extract
@@ -34,6 +48,7 @@ set -euo pipefail
 DT_ROOT=${QCOM_FW_DT_ROOT:-/sys/firmware/devicetree/base}
 FW_ROOT=${QCOM_FW_FIRMWARE_ROOT:-/usr/lib/firmware}
 KERNEL_CONFIG=${QCOM_FW_KERNEL_CONFIG:-/proc/config.gz}
+PROVIDED_DIR=${QCOM_FW_PROVIDED_DIR:-/usr/share/qcom-firmware-extract/provided.d}
 # Destination prefix for the installed-system and mount paths (tests only).
 ROOT=${QCOM_FW_ROOT:-}
 # The effective user ID the root checks see (tests only).
@@ -115,8 +130,43 @@ firmware_file() {
   return 1
 }
 
-declare -a missing_nodes=() missing_names=()
+# Names that board packages list for this machine as not from Windows.
+declare -A provided=()
+load_provided_names() {
+  local compatible list line
+  [[ -r $DT_ROOT/compatible && -d $PROVIDED_DIR ]] || return 0
+  while IFS= read -r compatible; do
+    [[ -n $compatible && $compatible != */* ]] || continue
+    list="$PROVIDED_DIR/$compatible.list"
+    [[ -f $list ]] || continue
+    if [[ ! -r $list ]]; then
+      warn "ignoring $list: it cannot be read"
+      continue
+    fi
+    while IFS= read -r line || [[ -n $line ]]; do
+      # A comment starts at a '#' that begins the line or follows a space.
+      line=" $line"
+      line=${line%%[[:space:]]#*}
+      line=${line#"${line%%[![:space:]]*}"}
+      line=${line%"${line##*[![:space:]]}"}
+      [[ -n $line ]] || continue
+      if [[ $line == *[[:space:]]* ]]; then
+        warn "ignoring '$line' in $list: a firmware name has no spaces"
+        continue
+      fi
+      provided[$line]=$compatible
+    done <"$list"
+  done < <(tr '\0' '\n' <"$DT_ROOT/compatible")
+  return 0
+}
+load_provided_names
+
+declare -a missing_nodes=() missing_names=() provided_names=()
 while read -r node name; do
+  if [[ -n ${provided[$name]-} ]]; then
+    provided_names+=("$name")
+    continue
+  fi
   firmware_file "$name" >/dev/null && continue
   missing_nodes+=("$node")
   missing_names+=("$name")
@@ -131,8 +181,11 @@ if [[ ! -d $DT_ROOT ]]; then
   log "no device tree on this machine, nothing to do"
   exit 0
 fi
+for name in "${provided_names[@]}"; do
+  log "skipping $name: listed in $PROVIDED_DIR/${provided[$name]}.list"
+done
 if [[ $mode != install ]] && ((${#missing_names[@]} == 0)); then
-  log "every firmware file the device tree names is already installed"
+  log "every firmware file the device tree names is already installed${provided_names[*]:+ or listed for this board}"
   exit 0
 fi
 
@@ -295,11 +348,16 @@ read_manifest() {
   done <"$1"
 }
 
-# Sets NAME's manifest line to NAME followed by FIELDS.
+# Sets NAME's manifest line to NAME followed by FIELDS; without FIELDS, removes
+# it.
 set_manifest_line() {
   local name=$1
   shift
-  manifest[$name]="$name $*"
+  if (($#)); then
+    manifest[$name]="$name $*"
+  else
+    unset 'manifest[$name]'
+  fi
 }
 
 write_manifest() {
@@ -417,6 +475,22 @@ fi
 mkdir -p "$STATE_DIR"
 touch "$MANIFEST"
 read_manifest "$MANIFEST"
+
+# A board may list a name after an earlier run installed it. That copy still
+# loads first, but this tool never deletes it: matching bytes would not prove
+# that the file is still the one it installed, since a board's own tool may
+# keep the same file there. Stop recording it and say where it is.
+for name in "${provided_names[@]}"; do
+  [[ -n ${manifest[$name]-} ]] || continue
+  set_manifest_line "$name"
+  write_manifest "$MANIFEST"
+  file="$FW_ROOT/updates/$name"
+  if [[ -e $file || -L $file ]]; then
+    log "note: an earlier run installed $file, but $name is now listed in $PROVIDED_DIR/${provided[$name]}.list; the file is left in place and no longer recorded"
+    log "note: while it is there it loads before any other copy. The board package may remove it, or you can by hand. This tool does not, because matching bytes would not prove that the file is still the one it installed: a board's own tool may keep the same file there."
+  fi
+done
+
 installed=0
 for i in "${!missing_names[@]}"; do
   node=${missing_nodes[$i]}

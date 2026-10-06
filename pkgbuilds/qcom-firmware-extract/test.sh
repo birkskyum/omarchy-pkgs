@@ -335,3 +335,130 @@ printf 'windows-dtb' >"$windows_store/adsp_dtbs.elf"
   [[ ! -e $TEST_SCAN_LOG ]]
   echo "ok - -d replaces the stage and the Windows partitions"
 )
+
+# A board package can list firmware names that must not come from Windows.
+board="$scratch/board"
+board_dt="$board/device-tree"
+provided_dir="$board/provided.d"
+router="qcom/glymur/vendor/board/usb4-router.bin"
+mkdir -p "$board_dt/remoteproc@0" "$board_dt/usb4@0" "$board/store" "$board/root" "$provided_dir"
+printf 'vendor,board\0qcom,glymur\0' >"$board_dt/compatible"
+printf '%s\0%s\0' "$adsp" "$dtb" >"$board_dt/remoteproc@0/firmware-name"
+printf '%s\0' "$router" >"$board_dt/usb4@0/firmware-name"
+printf 'store-adsp' >"$board/store/qcadsp.mbn"
+printf 'store-dtb' >"$board/store/adsp_dtbs.elf"
+printf 'store-router' >"$board/store/usb4-router.bin"
+
+# Runs the extractor through any command in $board_wrapper.
+board_wrapper=()
+run_board() {
+  QCOM_FW_DT_ROOT="$board_dt" \
+    QCOM_FW_FIRMWARE_ROOT="$board/firmware" \
+    QCOM_FW_ROOT="$board/root" \
+    QCOM_FW_TEST_EUID=0 \
+    QCOM_FW_PROVIDED_DIR="$provided_dir" \
+    PATH="$test_bin:$PATH" \
+    "${board_wrapper[@]}" bash "$extractor" "$@"
+}
+expected_missing=$(printf '%s\n' "$adsp" "$dtb")
+
+[[ $(run_board --list-missing) == "$expected_missing"$'\n'"$router" ]]
+printf '# Made by the board package from the Windows driver.\n  %s  # router image\n\n' "$router" \
+  >"$provided_dir/other,board.list"
+[[ $(run_board --list-missing) == "$expected_missing"$'\n'"$router" ]]
+# A compatible string names a list in provided.d, never one in a subdirectory.
+cp "$board_dt/compatible" "$board/compatible.saved"
+printf 'vendor/board\0' >"$board_dt/compatible"
+mkdir -p "$provided_dir/vendor"
+printf '%s\n' "$router" >"$provided_dir/vendor/board.list"
+[[ $(run_board --list-missing) == "$expected_missing"$'\n'"$router" ]]
+mv "$board/compatible.saved" "$board_dt/compatible"
+rm -r "$provided_dir/vendor"
+echo "ok - firmware listed for another board, or under a path, is still reported missing"
+
+mv "$provided_dir/other,board.list" "$provided_dir/vendor,board.list"
+[[ $(run_board --list-missing) == "$expected_missing" ]]
+run_board --stage "$board/stage" -d "$board/store"
+[[ -f $board/stage/$adsp && ! -e $board/stage/$router ]]
+[[ $(grep -c . "$board/stage/manifest") == 2 ]]
+run_board --install --no-rebuild -d "$board/store"
+[[ $(<"$board/firmware/updates/$adsp") == store-adsp && ! -e $board/firmware/updates/$router ]]
+if grep -Fq "$router" "$board/root/var/lib/omarchy/qcom-firmware/manifest"; then
+  echo "not ok - provided firmware is recorded as extracted" >&2
+  exit 1
+fi
+[[ -z $(run_board --list-missing) ]]
+echo "ok - listed firmware is neither searched for, installed nor reported missing"
+
+# List syntax: a '#' is a comment only at the start of a line or after a space,
+# and an entry with a space inside is skipped with a warning, not joined up.
+board_list="$provided_dir/vendor,board.list"
+cp "$board_list" "$board/list.saved"
+printf '%s\n' "${router%/*}/usb4- router.bin" "$router#2" >"$board_list"
+[[ $(run_board --list-missing 2>"$board/warnings") == "$router" ]]
+grep -Fq "ignoring '${router%/*}/usb4- router.bin' in $board_list" "$board/warnings"
+printf '\t%s\t# router image\r\n' "$router" >"$board_list"
+[[ -z $(run_board --list-missing) ]]
+echo "ok - list comments need a space before '#', and names with spaces are skipped"
+
+# Root reads any file, so as root (CI runs these tests in a root container)
+# run without the capabilities that let it.
+unreadable_skip=""
+if ((EUID == 0)); then
+  board_wrapper=(setpriv '--bounding-set=-dac_override,-dac_read_search'
+    '--inh-caps=-dac_override,-dac_read_search' --)
+  if ! "${board_wrapper[@]}" true 2>/dev/null; then
+    unreadable_skip="root can read it, and setpriv could not drop that capability"
+  fi
+fi
+chmod 000 "$board_list"
+if [[ -z $unreadable_skip ]] && "${board_wrapper[@]}" cat "$board_list" >/dev/null 2>&1; then
+  unreadable_skip="this user can still read a mode 000 file"
+fi
+if [[ -z $unreadable_skip ]]; then
+  output=$(run_board --list-missing 2>"$board/warnings")
+fi
+board_wrapper=()
+chmod 644 "$board_list"
+if [[ -z $unreadable_skip ]]; then
+  [[ $output == "$router" ]]
+  grep -Fq "ignoring $board_list: it cannot be read" "$board/warnings"
+  echo "ok - an unreadable list is skipped with a warning"
+else
+  echo "ok - an unreadable list is skipped with a warning # SKIP $unreadable_skip"
+fi
+cp "$board/list.saved" "$board_list"
+
+# A copy an earlier run installed before the name was listed is left in place,
+# with a note, and no longer recorded. It is never removed, even with the same
+# bytes, because a board's own tool may have written that file.
+board_manifest="$board/root/var/lib/omarchy/qcom-firmware/manifest"
+board_updates="$board/firmware/updates"
+install_unlisted_router() {
+  rm -f "$board_updates/$router"
+  mv "$board_list" "$board/list.off"
+  run_board --install --no-rebuild -d "$board/store" >/dev/null
+  mv "$board/list.off" "$board_list"
+  [[ $(<"$board_updates/$router") == store-router ]]
+  grep -q "^$router " "$board_manifest"
+}
+install_listed_router() {
+  local output
+  output=$(run_board --install --no-rebuild -d "$board/store")
+  [[ $(<"$board_updates/$router") == store-router ]]
+  [[ $output == *"note: an earlier run installed $board_updates/$router, but $router is now listed in $board_list; the file is left in place and no longer recorded"* ]]
+  if grep -q "^$router " "$board_manifest"; then
+    echo "not ok - a listed name is still recorded as installed" >&2
+    exit 1
+  fi
+}
+install_unlisted_router
+install_listed_router
+[[ $(<"$board_updates/$adsp") == store-adsp ]]
+install_unlisted_router
+# The board's tool writes the same bytes there as a new file.
+rm "$board_updates/$router"
+printf 'store-router' >"$board_updates/$router"
+install_listed_router
+rm "$board_updates/$router"
+echo "ok - a listed name's earlier copy is left in place and no longer recorded"

@@ -21,4 +21,5 @@ sha256sums=('SKIP' 'SKIP')
 package() {
   install -Dm755 qcom-firmware-extract "${pkgdir}/usr/bin/qcom-firmware-extract"
   install -Dm644 README.package.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+  install -dm755 "${pkgdir}/usr/share/${pkgname}/provided.d"
 }
