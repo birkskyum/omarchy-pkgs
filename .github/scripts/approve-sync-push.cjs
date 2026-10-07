@@ -6,9 +6,10 @@ const BOT = 'github-actions[bot]';
 // resulting pull_request runs for approval and, unlike a person's push,
 // creates no pull_request_target run, so approve-pr.yml never sees it. The
 // sync workflow therefore releases the runs for the commit it just pushed,
-// under the same rule approve-pr.yml applies: only while a maintainer's
-// build-approved label is on the PR. It acts only on its own bot-authored,
-// same-repository PR for the branch and commit it pushed.
+// under the same rule approve-pr.yml applies: only while build-approved is
+// on the PR. The sync applies that label itself, so its pushes build without
+// a maintainer. It acts only on its own bot-authored, same-repository PR for
+// the branch and commit it pushed.
 module.exports = async function approveSyncPush({ github, context, core,
   number, branch, headSha, since, approve = approvePrWorkflows, ...options }) {
   if (!Number.isInteger(number) || !branch || !headSha || !since) {
@@ -25,7 +26,7 @@ module.exports = async function approveSyncPush({ github, context, core,
     return;
   }
   if (!pr.labels.some(label => label.name === 'build-approved')) {
-    core.info(`PR #${number} has no build-approved label; its runs wait for a maintainer.`);
+    core.info(`PR #${number} has no build-approved label; its runs stay held.`);
     return;
   }
   await approve({ github, context, core, vouchStatus: 'bot', pullRequest: pr,

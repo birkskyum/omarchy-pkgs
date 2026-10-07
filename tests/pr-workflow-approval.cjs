@@ -363,7 +363,7 @@ test('a labelled sync PR has its bot push released', async () => {
   assert.deepEqual(state.approved, [1, 2]);
 });
 
-test('an unlabelled sync PR stays held for a maintainer', async () => {
+test('a sync PR whose label a maintainer removed stays held', async () => {
   const { state, push } = syncFixture();
   state.pr.labels = [];
   await push();
@@ -443,6 +443,10 @@ test('sync workflows push scoped runs aside and keep actions: write out of the s
     assert.match(sync, /branch: \$\{\{ steps\.branch\.outputs\.branch \}\}/, file);
     assert.doesNotMatch(sync, /^ +actions: write$/m, file);
     assert.match(approveJob, /^      actions: write$/m, file);
+    // The sync PR is bot-authored and trusted: it labels itself so its own
+    // pushes build, including the push that opens the PR.
+    assert.match(sync, /labels: \|\n +automated\n +build-approved\n/, file);
+    assert.match(approveJob, /needs\.sync\.outputs\.operation == 'created'/, file);
     assert.match(approveJob, /needs\.sync\.outputs\.operation == 'updated'/, file);
   }
 });

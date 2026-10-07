@@ -111,7 +111,11 @@ jobs:
             one receives it.
           branch: ${{ steps.branch.outputs.branch }}
           delete-branch: true
-          labels: automated
+          # The bot is trusted; build-approved lets the approve job below
+          # release GitHub's hold on its pushes without a maintainer.
+          labels: |
+            automated
+            build-approved
           reviewers: ryanrhughes
 
       - name: Notify Basecamp on failure
@@ -128,12 +132,13 @@ jobs:
 
   # GitHub holds pull_request runs from a GITHUB_TOKEN push for approval and
   # creates no pull_request_target run for it, so approve-pr.yml never sees
-  # the sync's own pushes. Once a maintainer has labelled the PR
-  # build-approved, release the held runs for the commit just pushed. A
-  # separate job, so the sync container's token never holds actions: write.
+  # the sync's own pushes. The sync labels its PR build-approved, so release
+  # the held runs for the commit just pushed, whether it opened the PR or
+  # updated it. A separate job, so the sync container's token never holds
+  # actions: write.
   approve:
     needs: sync
-    if: ${{ !cancelled() && needs.sync.outputs.operation == 'updated' }}
+    if: ${{ !cancelled() && (needs.sync.outputs.operation == 'created' || needs.sync.outputs.operation == 'updated') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -144,7 +149,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Release held build and test runs if build-approved
+      - name: Release held build and test runs
         uses: actions/github-script@v7
         env:
           NUMBER: ${{ needs.sync.outputs.number }}
