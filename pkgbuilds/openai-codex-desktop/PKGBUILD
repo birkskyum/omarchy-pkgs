@@ -5,7 +5,7 @@
 # the version and checksums below from that repository's package index.
 
 pkgname=openai-codex-desktop
-pkgver=26.930.41038
+pkgver=26.930.61225
 pkgrel=1
 pkgdesc="Official ChatGPT desktop app with Codex"
 arch=('x86_64' 'aarch64')
@@ -71,8 +71,8 @@ source_x86_64=("${_deb_x86_64}::${_pool}/${_deb_x86_64}")
 source_aarch64=("${_deb_aarch64}::${_pool}/${_deb_aarch64}")
 noextract=("${_deb_x86_64}" "${_deb_aarch64}")
 sha256sums=('b3a4503b5931f102444bc7015c3cf4e40266cf034e0d682bd2a407dc5b3ee58c')
-sha256sums_x86_64=('ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c')
-sha256sums_aarch64=('a4e76853b000efa9d6c32932ddd19973b4a2983c71d3bd144e5f2b9151cbb16b')
+sha256sums_x86_64=('b90a80f9353bc12a5a5b8469502a8e5794a3c54a371c8880e094d500de695bb8')
+sha256sums_aarch64=('541b4744a13a7972bddb0519887d4f626340ed3987817d35bcaf5fe88346d6bd')
 
 package() {
   cd "${srcdir}"
