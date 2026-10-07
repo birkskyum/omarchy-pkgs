@@ -7,10 +7,13 @@ pkgname=dropbox
 pkgver=272.4.3798
 pkgrel=1
 pkgdesc="A free service that lets you bring your photos, docs, and videos anywhere and share them easily."
-arch=("x86_64")
+arch=("x86_64" "aarch64")
 url="https://www.dropbox.com"
 license=(custom:Dropbox)
 depends=("libsm" "libxslt" "libxmu" "libxdamage" "libxrender" "libxxf86vm" "libxcomposite" "fontconfig" "dbus")
+# Dropbox ships Linux builds for x86_64 only. AArch64 runs the same client
+# under box64, which maps its glibc and GTK calls onto the native libraries.
+depends_aarch64=("box64")
 makedepends=("gendesk")
 optdepends=(
   'ufw-extras: ufw rules for dropbox'
@@ -43,7 +46,15 @@ package() {
   chmod 755 "$pkgdir"/opt/dropbox/*.so
 
   install -d "$pkgdir"/usr/bin
-  ln -s ../../opt/dropbox/dropbox "$pkgdir"/usr/bin/dropbox
+  if [[ $CARCH == aarch64 ]]; then
+    # `dropbox-cli start` runs dropboxd, so pointing dropboxd at box64 and
+    # /usr/bin/dropbox at dropboxd sends every launch through the emulator.
+    sed -i 's|^exec "$PAR"/dropbox "$@"$|exec /usr/bin/box64 "$PAR"/dropbox "$@"|' "$pkgdir"/opt/dropbox/dropboxd
+    grep -qxF 'exec /usr/bin/box64 "$PAR"/dropbox "$@"' "$pkgdir"/opt/dropbox/dropboxd
+    ln -s ../../opt/dropbox/dropboxd "$pkgdir"/usr/bin/dropbox
+  else
+    ln -s ../../opt/dropbox/dropbox "$pkgdir"/usr/bin/dropbox
+  fi
 
   install -Dm644 "$srcdir"/dropbox.desktop -t "$pkgdir"/usr/share/applications
   install -Dm644 "$srcdir"/DropboxGlyph_Blue.svg "$pkgdir"/usr/share/pixmaps/dropbox.svg
