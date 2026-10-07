@@ -1,22 +1,34 @@
 # Maintainer: owe contributors
 pkgname=owe
-pkgver=0.2.9
+pkgver=0.2.10
 pkgrel=1
 pkgdesc="High-performance wallpaper engine for Omarchy (mp4, gif, stills)"
 arch=('x86_64' 'aarch64')
 url="https://github.com/omacom/owe"
 license=('MIT')
-depends=('mpv' 'ffmpeg' 'wayland' 'libglvnd' 'libepoxy' 'systemd-libs' 'socat')
-makedepends=('meson' 'ninja' 'gcc' 'pkgconf' 'wayland-protocols')
+depends=('mpv' 'ffmpeg' 'wayland' 'libglvnd' 'libepoxy' 'systemd-libs' 'socat' 'qt6-declarative')
+makedepends=('meson' 'ninja' 'gcc' 'pkgconf' 'wayland-protocols' 'cmake')
 checkdepends=('python')
 optdepends=('intel-media-driver: VAAPI hardware decode on Intel GPUs'
             'libva-mesa-driver: VAAPI hardware decode on AMD GPUs')
-source=("$pkgname-$pkgver.tar.gz::https://github.com/omacom/owe/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('cbf55f6bf4ca88621a2e59b3a62b2b078e1c82c06437e1f5137fdaeb8b5b560a')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/omacom/owe/archive/refs/tags/v$pkgver.tar.gz"
+        'lock-policy-timestamp.patch')
+sha256sums=('b171397c24c0ffd6096781b3f744f674055a57f660a74db07a3b71a111a6980b'
+            '3ebf413093922b0917bca60c42720c6424c77b1695317364bf73f9fd745376d8')
+
+prepare() {
+  cd "$srcdir/owe-$pkgver"
+  # Upstream 9876702: make the invalidation test independent of filesystem timestamps.
+  patch -p1 -i "$srcdir/lock-policy-timestamp.patch"
+}
 
 build() {
   meson setup build "$srcdir/owe-$pkgver" -Dbuildtype=release -Dprefix=/usr
   ninja -C build
+  cmake -S "$srcdir/owe-$pkgver/qml-plugin" -B build-qml \
+    -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_LIBDIR=lib \
+    -DBUILD_TESTING=ON
+  cmake --build build-qml
 }
 
 check() {
@@ -30,11 +42,13 @@ check() {
     mapfile -t tests < <(meson test -C build --list | sed 's/^owe://' | grep -vx transition)
     (( ${#tests[@]} )) || return 1
   fi
-  meson test -C build "${tests[@]}"
+  meson test -C build --print-errorlogs "${tests[@]}"
+  ctest --test-dir build-qml --output-on-failure
 }
 
 package() {
   DESTDIR="$pkgdir" ninja -C build install
+  DESTDIR="$pkgdir" cmake --install build-qml
   install -d "$pkgdir/usr/lib/systemd/user"
   sed 's|%h/.local/bin/owed|/usr/bin/owed|' "$srcdir/owe-$pkgver/systemd/owed.service" \
     >"$pkgdir/usr/lib/systemd/user/owed.service"
