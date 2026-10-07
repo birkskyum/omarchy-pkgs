@@ -197,13 +197,35 @@ printf 'first-adsp' >"$rerun/adsp-only-store/qcadsp.mbn"
 printf 'windows-adsp' >"$windows_store/qcadsp.mbn"
 printf 'windows-dtb' >"$windows_store/adsp_dtbs.elf"
 
-# For a subshell: one internal NTFS partition holding the fake Windows tree
-# $1/nvme0n1p3. The disk listing and each mount are recorded in $2.
+# For a subshell: NTFS partitions holding fake Windows trees $1/<device name>,
+# by default one internal partition, or those that $TEST_PARTITIONS lists as
+# "PATH|FSTYPE|TRAN|RM|HOTPLUG" lines, where a field may be empty. lsblk prints
+# the requested columns as raw output does, an empty one as an empty string.
+# The disk listing and each mount are recorded in $2.
 # shellcheck disable=SC2329 # The stubs are exported to the extractor.
 stub_windows_partition() {
   lsblk() {
+    local arg previous="" path fstype tran rm hotplug column row
+    local -a columns=()
     printf 'lsblk\n' >>"$TEST_SCAN_LOG"
-    [[ -n ${TEST_NO_WINDOWS-} ]] || printf '/dev/nvme0n1p3 ntfs nvme\n'
+    [[ -z ${TEST_NO_WINDOWS-} ]] || return 0
+    for arg; do
+      if [[ $previous == -*o ]]; then IFS=, read -ra columns <<<"$arg"; fi
+      previous=$arg
+    done
+    while IFS='|' read -r path fstype tran rm hotplug; do
+      row=""
+      for column in "${columns[@]}"; do
+        case $column in
+          PATH) row+=" $path" ;;
+          FSTYPE) row+=" $fstype" ;;
+          TRAN) row+=" $tran" ;;
+          RM) row+=" $rm" ;;
+          HOTPLUG) row+=" $hotplug" ;;
+        esac
+      done
+      printf '%s\n' "${row# }"
+    done <<<"${TEST_PARTITIONS:-/dev/nvme0n1p3|ntfs|nvme|0|0}"
   }
   mount() {
     local device=${*: -2:1} mount_point=${*: -1}
@@ -378,6 +400,39 @@ stub_windows_partition() {
   [[ ! -e $rerun/firmware/updates/$adsp && $(installed "$dtb") == staged-dtb ]]
   rm -r "${windows_store%_1}_2"
   echo "ok - a staged file by name does not replace a refused ambiguous match"
+
+  # An installed system reads only internal disks; --stage, in the live
+  # session, also reads removable and external ones. The disks: a USB stick,
+  # a removable card that is neither USB nor hotplug, an internal disk whose
+  # TRAN lsblk leaves empty, and a hotplug NVMe disk.
+  (
+    export TEST_WINDOWS="$rerun/disks"
+    export TEST_PARTITIONS=$'/dev/sda1|ntfs|usb|1|0\n/dev/mmcblk0p1|ntfs|mmc|1|0\n/dev/nvme0n1p3|ntfs||0|0\n/dev/nvme1n1p3|ntfs|nvme|0|1'
+    external=(sda1 mmcblk0p1 nvme1n1p3)
+    inf="Windows/System32/DriverStore/FileRepository/adsp.inf_1"
+    mkdir -p "$TEST_WINDOWS"/{sda1,mmcblk0p1,nvme0n1p3,nvme1n1p3}/"$inf"
+    printf 'internal-adsp' >"$TEST_WINDOWS/nvme0n1p3/$inf/qcadsp.mbn"
+    for disk in "${external[@]}"; do
+      printf 'external-dtb' >"$TEST_WINDOWS/$disk/$inf/adsp_dtbs.elf"
+    done
+    reset_installed
+    output=$(run_rerun --install --no-rebuild)
+    [[ $(installed "$adsp") == internal-adsp && ! -e $rerun/firmware/updates/$dtb ]]
+    [[ $output == *"not reading removable or external disk partition(s): /dev/sda1 /dev/mmcblk0p1 /dev/nvme1n1p3;"* ]]
+    for disk in "${external[@]}"; do
+      if grep -qx "mount /dev/$disk" "$TEST_SCAN_LOG"; then
+        echo "not ok - an installed system mounted the removable or external /dev/$disk" >&2
+        exit 1
+      fi
+    done
+    reset_installed
+    run_rerun --stage "$rerun/all-disks"
+    [[ $(<"$rerun/all-disks/$adsp") == internal-adsp && $(<"$rerun/all-disks/$dtb") == external-dtb ]]
+    for disk in nvme0n1p3 "${external[@]}"; do
+      grep -qx "mount /dev/$disk" "$TEST_SCAN_LOG"
+    done
+  )
+  echo "ok - an installed system reads only internal disks, the live session all"
 )
 
 # A board package can list firmware names that must not come from Windows.

@@ -12,7 +12,7 @@
 #   --install         Installed system or the installer's chroot: take each
 #                     file from the stage (--stage-dir, default
 #                     /var/lib/omarchy/firmware-stage), else from a Windows
-#                     partition still on disk, write them under
+#                     partition still on an internal disk, write them under
 #                     /usr/lib/firmware/updates, record a manifest, add the
 #                     zap shader to the initramfs, and rebuild the boot image
 #                     (unless --no-rebuild). This is the default mode.
@@ -215,22 +215,30 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Mount Windows driver stores read-only, preferring internal disks.
+# Mount Windows driver stores read-only, preferring internal disks. With
+# "internal-only", removable and external disks are left alone.
 scan_windows_partitions() {
-  local dev fstype tran mp bitlocker=""
+  local scope=${1:-all} dev removable hotplug fstype tran mp bitlocker="" skipped=""
   if [[ $CHECKED_EUID != 0 ]]; then
     warn "must run as root to read the Windows partitions"
     exit 1
   fi
   local -a internal=() external=()
-  while read -r dev fstype tran; do
-    case $fstype in
-      ntfs) ;;
-      BitLocker) bitlocker+=" $dev"; continue ;;
-      *) continue ;;
-    esac
-    if [[ $tran == usb ]]; then external+=("$dev"); else internal+=("$dev"); fi
-  done < <(lsblk -rpno PATH,FSTYPE,TRAN 2>/dev/null | awk 'NF>=2')
+  # read merges empty columns, so the always-set RM and HOTPLUG come first
+  # and an empty TRAN comes last.
+  while read -r dev removable hotplug fstype tran; do
+    [[ $fstype == ntfs || $fstype == BitLocker ]] || continue
+    if [[ $removable == 0 && $hotplug == 0 && $tran != usb ]]; then
+      if [[ $fstype == ntfs ]]; then internal+=("$dev"); else bitlocker+=" $dev"; fi
+    elif [[ $scope == internal-only ]]; then
+      skipped+=" $dev"
+    elif [[ $fstype == ntfs ]]; then
+      external+=("$dev")
+    else
+      bitlocker+=" $dev"
+    fi
+  done < <(lsblk -rpno PATH,RM,HOTPLUG,FSTYPE,TRAN 2>/dev/null)
+  [[ -z $skipped ]] || log "not reading removable or external disk partition(s):$skipped; use -d for a driver store on one"
 
   for dev in "${internal[@]}" "${external[@]}"; do
     mp=$(mktemp -d "$ROOT/run/qcom-firmware-extract.XXXXXX")
@@ -483,8 +491,9 @@ else
     log "using the firmware staged by the installer in $stage_dir"
     use_stage "$stage_dir"
   fi
+  # After installation, only internal disks are read; -d reads any other.
   if stage_incomplete; then
-    scan_windows_partitions
+    scan_windows_partitions internal-only
   fi
 fi
 
