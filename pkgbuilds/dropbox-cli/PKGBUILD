@@ -7,9 +7,9 @@
 
 pkgname=dropbox-cli
 pkgver=2026.09.28
-pkgrel=1
+pkgrel=2
 pkgdesc="Command line interface for Dropbox"
-arch=("x86_64")
+arch=("any")
 url="https://www.dropbox.com"
 license=("GPL-3.0-or-later")
 makedepends=("gdk-pixbuf2")
