@@ -1,6 +1,8 @@
 {
   "source": "local",
-  "channels": ["edge"],
+  "channels": [
+    "edge"
+  ],
   "min_release_age": "24h",
   "rebuild_on": [
     "llvm"
@@ -9,6 +11,11 @@
     "watch": {
       "github": "joshuaswarren/omarchy-mlx",
       "pattern": "v(?P<version>[0-9]+(?:\\.[0-9]+)*)"
+    }
+  },
+  "rebuilt_against": {
+    "aarch64": {
+      "llvm": "23.1.1-1"
     }
   }
 }
