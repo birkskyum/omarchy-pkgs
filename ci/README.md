@@ -75,6 +75,7 @@ Edit `/etc/omarchy-controller.env` on the box. The next tick reads it.
 | `REGIONS` | empty | Regions to try first; empty means any |
 | `MAX_AGE_MINUTES` | 200 | Delete a droplet older than this |
 | `MAX_BOOT_MINUTES` | 10 | Delete a droplet still provisioning after this |
+| `DO_SSH_KEYS` | Ryan, DHH and Emir's account key IDs | Attached to every builder. Without one, DigitalOcean emails a root password per builder |
 
 ### Change the controller
 
@@ -110,7 +111,8 @@ DIGITALOCEAN_TOKEN=<account that pays for builders> GITHUB_TOKEN=<fine-grained P
 - The GitHub PAT is fine-grained and scoped to this repository: Actions read,
   Administration read and write (for runner registration tokens).
 - The DigitalOcean token is written into the box's env file, so it is the
-  account that pays.
+  account that pays. It needs ssh_key:read to attach `DO_SSH_KEYS`; without
+  it every create is refused with 403.
 - `ADMIN_GITHUB_USERS` names whose GitHub SSH keys get root on the box and
   the builders. Set it; the default is a fixed list in `create.sh`.
 - The script refuses to create a second controller.
