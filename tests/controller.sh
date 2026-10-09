@@ -105,6 +105,12 @@ jq -e '.tags == ["omarchy-builder"] and .size == "g5-32vcpu-64gb-50gb" and (.use
   && echo "PASS: create body carries tag, size, substituted user-data" \
   || { echo "FAIL: create body"; jq . "$BODY_FILE" | head -20; exit 1; }
 
+# Account keys reach the create, so DigitalOcean emails no root password.
+CANDIDATES=""; DO_SSH_KEYS='[123]' create_droplet >/dev/null
+jq -e '.ssh_keys == [123]' "$BODY_FILE" >/dev/null \
+  && echo "PASS: create body attaches DO_SSH_KEYS" \
+  || { echo "FAIL: create body ssh_keys"; jq .ssh_keys "$BODY_FILE"; exit 1; }
+
 # Sizes are tried in SIZES order, each in the regions DigitalOcean lists it
 # in stock (REGIONS first); a 422 falls through to the next pair with the
 # refusal's message logged, and a refused pair is not retried in the tick.

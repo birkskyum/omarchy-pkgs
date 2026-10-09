@@ -40,6 +40,12 @@ CLOUD_INIT=${CLOUD_INIT:-$(dirname "$0")/runner-cloud-init.yaml}
 # Operator public keys authorized on every builder (JSON array of strings).
 # The box's env file carries them; empty means no root login.
 SSH_KEYS_JSON=${SSH_KEYS_JSON:-[]}
+# DigitalOcean account SSH key IDs or fingerprints attached at creation (JSON
+# array). A droplet created with none gets a root password that DigitalOcean
+# emails to the token's owner, once per builder. Attaching one needs the
+# ssh_key:read scope on DIGITALOCEAN_TOKEN; without it every create is
+# refused with 403.
+DO_SSH_KEYS=${DO_SSH_KEYS:-[]}
 LOCK=${LOCK:-/tmp/omarchy-controller.lock}
 
 log() { echo "$(date '+%F %T') $*"; }
@@ -152,8 +158,8 @@ create_droplet() {
   while read -r size region; do
     [[ -n $size ]] || continue
     body=$(jq -n --arg name "$name" --arg region "$region" --arg size "$size" --arg image "$IMAGE" \
-      --arg tag "$TAG" --arg ud "$userdata" \
-      '{name:$name, region:$region, size:$size, image:$image, tags:[$tag], user_data:$ud, monitoring:false}')
+      --arg tag "$TAG" --arg ud "$userdata" --argjson keys "$DO_SSH_KEYS" \
+      '{name:$name, region:$region, size:$size, image:$image, tags:[$tag], user_data:$ud, ssh_keys:$keys, monitoring:false}')
     log "creating $name ($size in $region)"
     if response=$(do_api droplets -X POST -d "$body"); then
       jq -r '"created droplet \(.droplet.id)"' <<< "$response"
