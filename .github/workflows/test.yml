@@ -45,7 +45,7 @@ jobs:
           docker run --rm \
             -v "$PWD:/workspace:ro" \
             -w /workspace \
-            archlinux:base-devel bash -lc '
+            ghcr.io/archlinux/archlinux:base-devel bash -lc '
               set -euo pipefail
               pacman -Syu --noconfirm git jq python libarchive neovim tmux
               python tests/owe-package-restart.py
