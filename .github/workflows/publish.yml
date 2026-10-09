@@ -168,9 +168,13 @@ jobs:
     runs-on: ubuntu-latest
     environment: publish
     timeout-minutes: 30
+    # queue: max, because by default a group holds one waiting job: a third
+    # merge arriving cancels the second one's publish, and nothing reruns it.
+    # With it up to 100 wait, in the order they reach this job.
     concurrency:
       group: publish
       cancel-in-progress: false
+      queue: max
     steps:
       - uses: actions/checkout@v4
         with:

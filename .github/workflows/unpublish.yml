@@ -25,9 +25,11 @@ jobs:
     environment: publish
     timeout-minutes: 15
     # The publish job's group: one writer per channel database at a time.
+    # queue: max, as there: a waiting job is queued, not replaced.
     concurrency:
       group: publish
       cancel-in-progress: false
+      queue: max
     steps:
       - uses: actions/checkout@v4
         with:
