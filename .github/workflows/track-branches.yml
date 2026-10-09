@@ -11,6 +11,12 @@ name: Track upstream branches
 # and the merge publishes the artifacts. A tip that fails to build stays an
 # unmerged red PR that the next tick supersedes.
 #
+# One PR per package, on auto/track-branches-<package>. Packages pinned from
+# the same upstream branch (omarchy-dev and omarchy-settings-dev) share one,
+# because sync-upstream moves them in lockstep. A single batch PR let one
+# package with a broken build hold every other package back: omasnap-git's
+# smoke suite kept the quattro pins unmerged for four days (#788).
+#
 # The PR and auto-merge use the PAT in PKGS_BOT_TOKEN so they trigger the
 # build and publish workflows. The built-in GITHUB_TOKEN cannot drive this
 # unattended chain. The PAT needs Contents: write and Pull requests: write
@@ -18,8 +24,10 @@ name: Track upstream branches
 
 on:
   schedule:
-    # Every 2 hours, off the hour to dodge the scheduling backlog at :00
-    - cron: '35 */2 * * *'
+    # Hourly, off the hour to dodge the scheduling backlog at :00. GitHub
+    # drops scheduled runs under load: the old every-2-hours entry fired
+    # every 6 to 9 hours in practice.
+    - cron: '35 * * * *'
   workflow_dispatch:
     inputs:
       packages:
@@ -27,8 +35,8 @@ on:
         required: false
         default: ''
 
-# One tracker at a time: two runs racing on auto/track-branches would each
-# force-push their own pin over the other's.
+# One tracker at a time: two runs racing on one auto/track-branches-* branch
+# would each force-push their own pin over the other's.
 concurrency:
   group: track-branches
   cancel-in-progress: false
@@ -38,6 +46,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      groups: ${{ steps.groups.outputs.groups }}
 
     steps:
       - name: Require the tracking token
@@ -88,25 +98,101 @@ jobs:
           PACKAGES: ${{ github.event.inputs.packages }}
           UPSTREAM_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check for changes
+      # The PR a pin rides: one per package, or one per upstream branch for
+      # packages that must move together. The pins travel to the PR jobs as
+      # a patch, so the upstream feeds are read once and every PR is cut
+      # from the same answers.
+      - name: Group the pins into PRs
         if: ${{ !cancelled() && steps.sync.outcome != 'skipped' }}
-        id: changes
+        id: groups
         run: |
-          if [ -z "$(git status --porcelain)" ]; then
-            echo "has_changes=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_changes=true" >> "$GITHUB_OUTPUT"
-            git status --porcelain
-            {
-              echo "### Pinned"
-              git diff --unified=0 -- 'pkgbuilds/*/PKGBUILD' | grep -E '^\+(pkgver|_commit)=' | sed 's/^+/- /'
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
+          git diff --binary -- pkgbuilds > "$RUNNER_TEMP/pins.patch"
+          declare -A members=()
+          while IFS= read -r package; do
+            key=$(jq -r '(.upstream.watch? | objects | select(has("git_branch")) | "\(.git_branch)#\(.branch)") // empty' \
+              "pkgbuilds/$package/.omarchy/package.json" 2>/dev/null || true)
+            members["${key:-$package}"]+="$package "
+          done < <(git diff --name-only -- pkgbuilds | cut -d/ -f2 | sort -u)
+          groups='[]'
+          for key in "${!members[@]}"; do
+            read -r -a packages <<<"${members[$key]}"
+            branch=$(.github/scripts/sync-pr-branch.sh auto/track-branches "${packages[@]}" | sed -n 's/^branch=//p')
+            groups=$(jq -c --arg branch "$branch" --arg packages "${packages[*]}" \
+              '. + [{branch: $branch, packages: $packages}] | sort_by(.branch)' <<<"$groups")
+          done
+          echo "groups=$groups" >> "$GITHUB_OUTPUT"
+          jq -r '.[] | "- `\(.branch)`: \(.packages)"' <<<"$groups" | sed '1i ### Tracker PRs' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Hand the pins to the PR jobs
+        if: ${{ !cancelled() && steps.groups.outputs.groups != '' && steps.groups.outputs.groups != '[]' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pins
+          path: ${{ runner.temp }}/pins.patch
+          retention-days: 1
+
+      # A tracker PR that this run did not refresh and that conflicts with
+      # master is stale: master moved its packages on without it. Close it
+      # rather than leave a red PR behind. Whether a PR was refreshed is not
+      # enough on its own, since a feed that failed this run (one of fifty
+      # timing out is routine) leaves a still-valid PR unrefreshed too. The
+      # old single auto/track-branches PR is retired outright: the per-package
+      # PRs replace it.
+      - name: Close superseded tracker PRs
+        if: ${{ !cancelled() && steps.groups.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.PKGS_BOT_TOKEN }}
+          GROUPS_JSON: ${{ steps.groups.outputs.groups }}
+        run: |
+          gh pr list -R "${{ github.repository }}" --state open --limit 200 --json number,headRefName,mergeable \
+            --jq '.[] | select(.headRefName | startswith("auto/track-branches")) | "\(.number) \(.headRefName) \(.mergeable)"' |
+          while read -r number branch mergeable; do
+            jq -e --arg branch "$branch" 'any(.[]; .branch == $branch)' <<<"$GROUPS_JSON" >/dev/null && continue
+            [[ $branch == auto/track-branches || $mergeable == CONFLICTING ]] || continue
+            echo "closing #$number ($branch): superseded"
+            gh pr close "$number" -R "${{ github.repository }}" --delete-branch \
+              --comment "Superseded: master has moved these packages on, or a per-package tracker PR carries them now."
+          done
+
+  pr:
+    needs: track
+    if: ${{ !cancelled() && needs.track.outputs.groups != '' && needs.track.outputs.groups != '[]' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        group: ${{ fromJSON(needs.track.outputs.groups) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Fetch the pins
+        uses: actions/download-artifact@v4
+        with:
+          name: pins
+          path: ${{ runner.temp }}
+
+      - name: Apply this PR's pins
+        env:
+          PACKAGES: ${{ matrix.group.packages }}
+        run: |
+          read -r -a packages <<<"$PACKAGES"
+          git apply $(printf -- '--include=pkgbuilds/%s/* ' "${packages[@]}") "$RUNNER_TEMP/pins.patch"
+          git status --porcelain
+          {
+            echo "### Pinned"
+            git diff --unified=0 -- 'pkgbuilds/*/PKGBUILD' | grep -E '^\+(pkgver|_commit)=' | sed 's/^+/- /'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # The PR title names what moved, so the merged history reads like a
       # changelog: "Track upstream branches: omarchy-dev 4.0.0.r6520.g1a2b3c4, ...".
       - name: Describe the pins
-        if: ${{ !cancelled() && steps.changes.outputs.has_changes == 'true' }}
         id: describe
         run: |
           title=$(git diff --unified=0 -- 'pkgbuilds/*/PKGBUILD' \
@@ -115,7 +201,6 @@ jobs:
           echo "title=Track upstream branches: ${title}" >> "$GITHUB_OUTPUT"
 
       - name: Open or update the tracking PR
-        if: ${{ !cancelled() && steps.changes.outputs.has_changes == 'true' }}
         id: pr
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
@@ -123,15 +208,16 @@ jobs:
           commit-message: ${{ steps.describe.outputs.title }}
           title: ${{ steps.describe.outputs.title }}
           body: |
-            Automated update of packages on the unattended lane
-            (`"auto_merge": true` in `.omarchy/package.json`). Branch-tracking
-            packages now pin their branch tip; release-feed packages move to
-            their newest upstream release. Fresh releases and tips wait until
-            they are at least `min_release_age` old.
+            Automated pin of packages that follow a moving upstream branch
+            or a trusted release feed (`"auto_merge": true` in
+            `.omarchy/package.json`). Each package's recipe now points at the
+            newest upstream release, or the newest branch tip whose commit
+            timestamp is at least `min_release_age` old.
 
             This PR auto-merges once the build checks pass. A failing build
-            leaves it open; the next tracker run replaces it with the newer tip.
-          branch: auto/track-branches
+            leaves it open without holding back any other package; the next
+            tracker run replaces it with the newer tip.
+          branch: ${{ matrix.group.branch }}
           delete-branch: true
           labels: automated
 
@@ -139,7 +225,7 @@ jobs:
       # `result`, `self-tests` and `build-isolation` green, and this lane
       # inherits every rule the reviewed lane has except the human.
       - name: Enable auto-merge
-        if: ${{ !cancelled() && steps.pr.outputs.pull-request-number != '' }}
+        if: ${{ steps.pr.outputs.pull-request-number != '' }}
         env:
           GH_TOKEN: ${{ secrets.PKGS_BOT_TOKEN }}
           PR: ${{ steps.pr.outputs.pull-request-number }}
@@ -151,8 +237,13 @@ jobs:
           fi
           gh pr merge --auto --merge "$PR" -R "${{ github.repository }}"
 
+  notify:
+    needs: [track, pr]
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    steps:
       - name: Notify Basecamp on failure
-        if: failure() && env.BASECAMP_CHATBOT_URL != ''
+        if: ${{ env.BASECAMP_CHATBOT_URL != '' }}
         env:
           BASECAMP_CHATBOT_URL: ${{ secrets.BASECAMP_CHATBOT_URL }}
         run: |

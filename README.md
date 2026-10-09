@@ -391,12 +391,13 @@ on `auto/sync-upstream-<packages>` or `auto/sync-rebuilds-<packages>`.
 |---|---|---|---|
 | `sync-upstream.yml` | every 6 hours | one PR on `auto/sync-upstream` with every new upstream release | **a maintainer merges it** |
 | `sync-rebuilds.yml` | every 6 hours | one PR on `auto/sync-rebuilds` bumping `pkgrel` where a `rebuild_on` dependency moved | itself, when green |
-| `track-branches.yml` | every 2 hours | one PR on `auto/track-branches` updating `"auto_merge": true` packages to their newest upstream release or branch tip | itself, when green |
+| `track-branches.yml` | hourly | one PR per package on `auto/track-branches-<package>` updating `"auto_merge": true` packages to their newest upstream release or branch tip; packages pinned from the same branch share one | itself, when green |
 
-- **Each PR is a batch.** One package that fails to build keeps the whole PR
-  red and unmerged. Fix that package on `master`. For the two sync workflows,
-  a run with `packages` naming the healthy ones gives them their own PR. The
-  branch tracker has one PR only; its next run replaces it.
+- **Each sync PR is a batch.** One package that fails to build keeps the
+  whole PR red and unmerged. Fix that package on `master`. A run with
+  `packages` naming the healthy ones gives them their own PR. The branch
+  tracker opens a PR per package, so a red one holds back only itself; its
+  next run replaces it, and closes it once master holds a newer pin.
 - **A package with no upstream declaration or hook gets no upstream updates.** That
   includes the kernels (`linux-omarchy*`, `linux-ptl`, `linux-aurora`): bump
   them by PR.
@@ -491,7 +492,7 @@ docs/                          Reference
 | `approve-pr.yml` | PR events | Releases GitHub's hold on a `build-approved` PR's runs |
 | `sync-upstream.yml` | every 6 hours, dispatch | Upstream release PR |
 | `sync-rebuilds.yml` | every 6 hours, dispatch | Dependency rebuild PR |
-| `track-branches.yml` | every 2 hours, dispatch | Branch tip PR |
+| `track-branches.yml` | hourly, dispatch | Branch tip PRs |
 | `builder-images.yml` | daily, changes to the image's inputs (push and PR), dispatch | Builds and tests the builder image; publishes it from `master` |
 
 Secrets: the `publish` environment (usable from `master` only) holds the

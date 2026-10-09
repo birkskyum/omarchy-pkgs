@@ -333,6 +333,7 @@ test('only same-repository sync branches queue behind an in-flight build', () =>
   assert.equal(cancels('omacom/omarchy-pkgs', 'auto/sync-upstream'), false);
   assert.equal(cancels('omacom/omarchy-pkgs', 'auto/sync-upstream-ttfx'), false);
   assert.equal(cancels('omacom/omarchy-pkgs', 'auto/sync-rebuilds'), false);
+  assert.equal(cancels('omacom/omarchy-pkgs', 'auto/track-branches-omarchy-dev-omarchy-settings-dev'), false);
   assert.equal(cancels('omacom/omarchy-pkgs', 'ttfx/fix'), true);
   assert.equal(cancels('someone/omarchy-pkgs', 'auto/sync-upstream'), true);
   assert.equal(cancels(undefined, ''), true); // workflow_dispatch
