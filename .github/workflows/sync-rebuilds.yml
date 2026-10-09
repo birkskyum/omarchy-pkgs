@@ -68,7 +68,7 @@ jobs:
             -v "$PWD/helpers:/workspace/helpers:ro" \
             -v "$PWD/pkgbuilds:/workspace/pkgbuilds" \
             -w /workspace \
-            archlinux:base-devel bash -lc '
+            ghcr.io/archlinux/archlinux:base-devel bash -lc '
               set -euo pipefail
 
               printf "Server = https://mirror.omarchy.org/\$repo/os/\$arch\n" > /etc/pacman.d/mirrorlist
