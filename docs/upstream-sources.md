@@ -220,3 +220,185 @@ These packages were already excluded from automatic AUR updates. The migration p
 - RustDesk reads hbb_common from the release gitlink; its existing build-time dependency/toolchain checks remain in force.
 - Spotify uses HTTPS and retains its signed Release/Packages verification.
 - Source and build compatibility still need review when upstream code changes. Direct watches remove AUR recipe churn, not the need to maintain packaging.
+
+## How the sync PR builds
+
+`sync-upstream.yml` pushes its PR with the built-in `GITHUB_TOKEN`, so GitHub
+holds the PR's build and test runs for approval. The workflow labels its own
+PR `build-approved`, and its `approve` job releases the held runs for each
+commit it pushes. A push to an `auto/sync-*` branch does not cancel the PR's
+build in flight: the new build waits, then reuses every artifact the finished
+one uploaded.
+
+Because of that push, GitHub starts no `pull_request_target` workflow for the
+PR, so `auto-merge-pr.yml` never arms it: a maintainer merges it.
+
+A run started by hand with `packages` opens its own PR on
+`auto/sync-upstream-<packages>`. The next scheduled run still picks the same
+update up in the shared PR if it has not merged by then; identical package
+trees reuse the same build artifacts.
+
+## Declarative providers and hooks
+
+The older provider form, still in use beside `upstream.watch`. Give a new
+package an `upstream.watch`; `helpers/upstream-watch.py check` validates that
+form only.
+
+```bash
+bin/sync-upstream                       # Update every package with an upstream hook
+bin/sync-upstream openai-codex-desktop  # Update specific packages
+```
+
+A package declares where its releases come from either as data or, for an
+unusual feed, a small hook.
+
+A vendor shipping tagged GitHub releases is pure data, declared as `upstream`
+in `.omarchy/package.json` with no code at all:
+
+```json
+"upstream": {
+  "github": "jdx/mise",
+  "checksums": "SHASUMS256.txt",
+  "assets": {
+    "x86_64": "mise-{tag}-linux-x64.tar.xz",
+    "aarch64": "mise-{tag}-linux-arm64.tar.xz"
+  }
+}
+```
+
+`checksums` names the manifest asset the vendor publishes. A vendor publishing
+none sets `"digests": true` instead, and the checksums come from the SHA-256
+digest GitHub's release API reports for every asset — see
+`pkgbuilds/schist-bin/.omarchy/package.json`. Either way the artifacts
+themselves are never downloaded.
+
+An architecture may map to an ordered array when its PKGBUILD downloads more
+than one release asset. Small versioned files outside the release assets can be
+listed under `sources` and are downloaded and hashed when a new version appears:
+
+```json
+"upstream": {
+  "github": "owner/project",
+  "digests": true,
+  "assets": {
+    "x86_64": ["tool-{pkgver}-x86_64", "tool-{pkgver}-x86_64.asc"],
+    "aarch64": ["tool-{pkgver}-aarch64", "tool-{pkgver}-aarch64.asc"]
+  },
+  "sources": {
+    "any": ["https://raw.githubusercontent.com/owner/project/{tag}/LICENSE"]
+  }
+}
+```
+
+Asset and source keys must be disjoint because each key maps to one PKGBUILD
+checksum array (`any` means the unsuffixed `sha256sums`).
+
+Repositories whose historical releases use incompatible tag schemes may set
+`"latest_only": true`. The provider then considers only the newest stable
+GitHub release, while retaining all validation for that release. A quarantine
+will wait for that release to age instead of falling back to an older one.
+
+`{tag}` and `{pkgver}` interpolate into asset names; a leading `v` on the tag is
+stripped for `pkgver`; drafts and prereleases are ignored. Only the 100 most
+recent releases are considered. The provider fails closed on anything it cannot
+read — an unusable tag, timestamp, or checksum stops the sync rather than being
+skipped.
+
+Projects that publish version tags but no checksum manifest can declare the
+tag repository, the exact tag shape, and every source that should be hashed:
+
+```json
+"upstream": {
+  "git_tags": "https://github.com/owner/project.git",
+  "tag_pattern": "v{pkgver}",
+  "sources": {
+    "any": ["https://github.com/owner/project/archive/refs/tags/{tag}.tar.gz"]
+  }
+}
+```
+
+The newest matching tag is selected with pacman's `vercmp`; unrelated tags are
+ignored. `tag_pattern` must contain exactly one `{pkgver}`. Source templates may
+use `{tag}` and `{pkgver}`. Each expanded URL must be HTTPS and is downloaded
+only when the discovered version is newer. A checked-in patch or other local
+source can be included as `file:patch-name.patch`; it is hashed from the package
+directory. Keys such as `any`, `x86_64`, and `aarch64` select the corresponding
+`sha256sums` array.
+
+npm packages use the same source mapping, with `{npm_tarball}` available for
+the tarball named by the selected dist-tag:
+
+```json
+"upstream": {
+  "npm": "@scope/package",
+  "dist_tag": "latest",
+  "sources": {
+    "any": ["{npm_tarball}", "https://example.com/v{pkgver}/CHANGELOG.md"]
+  }
+}
+```
+
+`dist_tag` defaults to `latest`. The registry's publication timestamp is
+carried into the provider result, so `min_release_age` works for npm packages.
+
+A vendor with a plain-text Debian `Packages` index can use it to discover the
+newest exact package version, then hash immutable source URLs:
+
+```json
+"upstream": {
+  "debian": "https://example.com/debian/dists/stable/main/binary-amd64/Packages",
+  "package": "example-app",
+  "sources": {
+    "x86_64": ["https://example.com/tool-{pkgver}-x64.tar.gz"],
+    "aarch64": ["https://example.com/tool-{pkgver}-arm64.tar.gz"]
+  }
+}
+```
+
+This deliberately accepts only Debian versions that are already valid Arch
+`pkgver` values. Feeds needing epoch, revision, or filename translation retain
+a hook. Exactly one of `github`, `git_tags`, `npm`, or `debian` may appear in a
+declaration.
+
+A timestamped provider may also declare `"min_release_age": "24h"`
+(`s`/`m`/`h`/`d` suffix or bare seconds) to quarantine fresh releases until
+maintainers have had time to pull a bad or compromised one. GitHub Releases and
+npm provide publication times; raw git tags and Debian Packages indexes do not,
+so combining either with this policy fails closed. The newest release that has
+cleared the window ships, so a fast release cadence cannot starve updates. The
+window is enforced
+centrally: whatever reports the release must prove its age via `published_at`,
+or the sync fails. A maintainer deliberately shipping inside the window runs
+`BYPASS_MIN_RELEASE_AGE=1 bin/sync-upstream <package>` locally and merges the
+result through a normal PR; scheduled automation never sets the bypass.
+
+A vendor whose feed fits no convention (a Debian package index, a bare
+version.txt) instead provides `.omarchy/upstream.sh`, a hook that reports the
+newest upstream release as JSON on stdout — declaring both an `upstream` block
+and a hook is an error:
+
+```json
+{
+  "pkgver": "1.2.3",
+  "sha256sums": { "x86_64": ["<sha256>"], "aarch64": ["<sha256>"] }
+}
+```
+
+Architecture keys become `sha256sums_<arch>` in the PKGBUILD; the key `any` means
+the unsuffixed `sha256sums` array, and only the arrays a hook names are touched.
+An empty object (`{}`) reports no update, which is how a hook waits out a release
+that has landed for one architecture but not yet the other.
+
+When the reported version is newer than the checked-in one, `bin/sync-upstream`
+rewrites `pkgver` and those checksum arrays and resets `pkgrel` to 1. A version
+that is equal or older leaves the package alone, so a vendor rolling a release
+back cannot walk the repository backwards.
+
+Hooks should read checksums from whatever manifest the vendor publishes rather
+than downloading the artifacts — see `pkgbuilds/openai-codex-desktop/.omarchy/upstream.sh`,
+which reads OpenAI's Debian package index and never fetches the 750 MB of debs
+it describes. Hooks honoring `min_release_age` receive the window as
+`MIN_RELEASE_AGE_SECONDS` and report `published_at` alongside `pkgver`.
+
+`bin/sync-upstream self-test` runs offline fixture tests over the release
+selection, quarantine backstop, duration parsing, and manifest validation.
