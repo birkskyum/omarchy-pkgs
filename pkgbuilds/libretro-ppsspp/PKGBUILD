@@ -89,10 +89,12 @@ prepare() {
 
 build() {
   # The libretro Makefile builds aarch64 only for Android; libretro's own CI
-  # builds the Linux aarch64 core with CMake.
+  # builds the Linux aarch64 core with CMake. Arch Linux ARM's RetroArch runs
+  # OpenGL ES, so the core asks for an OpenGL ES context.
   cmake -S libretro-ppsspp -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=None \
-    -DLIBRETRO=ON
+    -DLIBRETRO=ON \
+    -DUSING_GLES2=ON
   cmake --build build
 }
 
