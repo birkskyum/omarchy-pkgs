@@ -8,7 +8,7 @@
 pkgbase=linux-omarchy-aarch64
 _kernel=linux-omarchy
 pkgver=7.2.8
-pkgrel=19
+pkgrel=20
 pkgdesc='Omarchy Linux for aarch64 (BORE CPU scheduler, ADIOS I/O scheduler)'
 url='https://omarchy.org'
 arch=(
@@ -335,6 +335,14 @@ source=(
   2177-PCI-allow-D3-for-hotplug-capable-root-ports-on-Qualc.patch
   2178-drm-msm-keep-the-GMU-optional-and-its-lock-initialis.patch
   2179-soc-qcom-adsp-pwr-lmts-drop-an-unused-include-and-sa.patch
+  2200-arm64-dts-qcom-x1e80100-lenovo-yoga-slim7x-Add-pm8010-camera-PMIC.patch
+  2201-arm64-dts-qcom-x1e80100-lenovo-yoga-slim7x-Add-l7b_2p8-regulator.patch
+  2202-arm64-dts-qcom-x1e80100-lenovo-yoga-slim7x-Add-ov02c10-RGB-sensor.patch
+  2203-arm64-dts-qcom-x1e80100-lenovo-yoga-slim7x-enable-camera-privacy-indicator.patch
+  2204-regulator-dt-bindings-Add-regulator-off-on-delay-us-property.patch
+  2205-regulator-qcom-rpmh-Add-support-for-regulator-off-on-delay-us.patch
+  2206-arm64-dts-qcom-x1e80100-lenovo-yoga-slim7x-Keep-the-camera-rails-off-for-2.5-s.patch
+  2207-arm64-dts-qcom-hamoa-Power-the-display-GDSC-while-the-camera-runs.patch
 )
 source_aarch64=(config.aarch64)
 validpgpkeys=(
@@ -771,7 +779,15 @@ sha256sums=('12e8d5a973d1ad7c5a5c69882e4022b131ed715db7003fdcd760ddf8c3e51941'
             '3e1f3526e989c0d9f26f3ed81229675b1aa419be21b99584d65c595cadb3fb90'
             '9784af3d74269b567d1a2bb7455052b2a4ed969f9be370b0fd13ab5c34d1ad98'
             '498fb0728b5e78446f0f7aa4a0fd5546df7b6a7e979eb97111a6314213019071'
-            '89770095e3a2c651e52fa7fe997032c0447924b015ca636462f12dcb8ea62ce0')
+            '89770095e3a2c651e52fa7fe997032c0447924b015ca636462f12dcb8ea62ce0'
+            'f23b59aec9288b499bf17b19e29a29d7307841ac31e07e7acc8748736061d06a'
+            '9ca3d621fb4da0712bc8835845ced553c46c43c47e31830c52bd0c3da4a2131b'
+            '885894a3f007a6f265371e4464da3c40b41fe67ed971a8b8281feaced9ed16b2'
+            'fbe7f557b091b151c9f91eb1de437068fab0901608081216d8a7c687e8101ea9'
+            '69510addd64f858f891cd52741df711200a78b1f3cf034d5fcfaac0e0db2ce29'
+            '2e55f0d2dbe53037c4994e844353df71e6f519e196dfee7da6bdd2e9d42dba66'
+            '57bf9c76fc30e576359621bec2678039d585d50030b543c769aa1ab1341791b4'
+            'bd77fa17f6c05b4d09a722529d08de90e7348522906eec8146ee225083c778c5')
 sha256sums_aarch64=('509f5e01b9fdf64ee35f24c95e6ba11985c9ea875147a38549f9f8adf4792e6f')
 b2sums=('5326dde778eb945f282740ef0d8765b46fbd198f1209cdfd7b91e5dac1312fc01f8bf0b2bc67b16a76de736edd8ea21b38b6c91e696ec0c4b39746cd21a15214'
         'SKIP'
@@ -1202,7 +1218,15 @@ b2sums=('5326dde778eb945f282740ef0d8765b46fbd198f1209cdfd7b91e5dac1312fc01f8bf0b
         '954547ae2ec21bd4accc78ac98c3c006fc59f4de664dcea9e2a7a7983e307d69ec9d36bec71affa35f55c45a0df48825360e3173974787744f631c2fc5899772'
         'fc9b1f669658782b0b1bd24d78f417ab1adb7fa2f03d1e786dc417f20f062a1636ae39e388c3dcb0e2cbe4b85715bcdc4d1e14781e02117a8da3aac002f589cc'
         '07257129cd109ff9bac262ea609d986be416a5b51ed3c59eca7ab8a1f208a09e6e84d02e8a5afb582396531602bd5230ab452398a77eb5d995c54c9ec129f356'
-        'f9ff214893ee8e12c1dfbe7998b5e5c46eff9ae99fc9b7be3b5570bddb11621b3d3de4738cc5c07f36e8aee6b2340450e23b85ad5fb5e3cba0ae07492593bcd6')
+        'f9ff214893ee8e12c1dfbe7998b5e5c46eff9ae99fc9b7be3b5570bddb11621b3d3de4738cc5c07f36e8aee6b2340450e23b85ad5fb5e3cba0ae07492593bcd6'
+        'f291a2ceab4c4d3a77232cae61c512afa4fbd7ef2d246ae34949530381890107aa2eff821e0619f72c5e0e59e06a9cb8a91597514b3493f91a5bf6dedf6a6959'
+        'eb7bb50d8dbb66f61466c21abcb513ce8e9ca7cc92f528e8a6bb79378d82c77e1ce8bf5d43cce2691002f01a797b593e119808213b33fd41b89339862295c169'
+        'd5c33c3913958e4a274cbf7259277139992b5223f66ce4d78f3caa01ee1268f3f4f03dda031617b46753375bd845aab9f9d6ef1579f8d3fcf8e7b27001995197'
+        '6e76476209999f9bcc7d90c4124f30eea7756b9acbd919793c93198ef504d47e80b89423c0b93c9c7b6db55479e8f795593c69d540094a8b845899f7bec46411'
+        'b396f18758aad1ca298e5501910d8f445eba6588a9dad9d2b972f66001c16f3b25387a4c3a1dc3af5ec917738edb1358bbc59d441fbbc42c82bf5092fc5a06a6'
+        'dc1def9d12d1fe634e12d0a55c82be228dad9e6870f0db64207f01eb8ae2adc45b4ca9ba5ec9736fc64fb1108a38135e5169f0ec5cf8647aa05b7c2f948f3fd2'
+        '3899e6dc9fdb215359621b455d8bc7c7066c2660b089a5f4740f9861b3598166201c96a1d5c52ead5cb44c15f4694643a08c04651540ad881f79a628f55feb46'
+        '84e559dce8b21d6611619f48352bfe7b00bdb933b9b984ce2cd2724782efd7c1eae21856cf5f94d8a0ffe3ff66e4d00c2b099236527c7defbcdcf7cb4c04b7aa')
 b2sums_aarch64=('9ee4a04952676941a0aca4ded0cfa79f1b33e485828d620807da04a3dfd3c3fc920746182091dadb32fb6fa2f289cd939a3a35569fb4ef8f923682b421461b58')
 
 # https://www.kernel.org/pub/linux/kernel/v7.x/sha256sums.asc
