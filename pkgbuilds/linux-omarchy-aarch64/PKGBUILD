@@ -256,6 +256,7 @@ source=(
   1102-HID-asus-host-controlled-Fn-lock-for-the-0B05-4B42-keyboard.patch
   1103-HID-asus-disable-OOBE-mode-on-the-ProArt-P14-keyboard-too.patch
   1104-HID-asus-turn-the-keyboard-backlight-off-for-sleep-without-asus-wmi.patch
+  1110-tools-linux-types.h-Add-128-bit-integer-types-for-arm64-UAPI-structures.patch
   2000-media-iris-reset-AHB-bridge-before-enabling-HW-mode.patch
   2001-ASoC-qcom-q6apm-lpass-dais-Reset-the-codec-DMA-channel-map-in-hw_params.patch
   2002-power-supply-qcom_battmgr-Notify-charger-supplies-of-online-changes.patch
@@ -701,6 +702,7 @@ sha256sums=('12e8d5a973d1ad7c5a5c69882e4022b131ed715db7003fdcd760ddf8c3e51941'
             '9b5940534409ec08d285fbb749c7f6ba1649825f346e7ab2a1f975b5dfbcf310'
             'c7b388262ae9f8f9ec2e4f3366eb2d0cbd4d1e93f0bb563b7d3df3a17fd16e74'
             '2efbd3f5d196c31c85a3733707a89cd54f8579756e30f3a16b8ac45ed76b32a6'
+            '30b45a34e029aee8cd57123300a83ab1dfe473cb6c88d87ad1b3cccd891e0648'
             '61260d5828b8d5009df572d5efe50ae359879fb0fbb1bc42d9145dc1947fc8dd'
             '2c2eeccb8ac53d8626494fc4a5f47ab4b7271f68c5318a67fc5f5cd130763671'
             '9f08ec0bb897a496283e8f82a9478bdf42189b739094613ddc0a378b68a12dc7'
@@ -1140,6 +1142,7 @@ b2sums=('5326dde778eb945f282740ef0d8765b46fbd198f1209cdfd7b91e5dac1312fc01f8bf0b
         '4d7f30645b60a53f38426ae3b81d63aeaa5131c37de609a29ed6f860b9c8c4af135344adc2ebf34d2578c5b7e24fc2f5953313626133a84dd11899ec8ddf86d4'
         'fe4c9b5c3daa914887734219bf63c651e28981cbc6ea9fdb11316b40e7c6e91d2784fdcc8307e5592eeed85809fb7e0ed284bd4b1e2e0714202f014705e4247d'
         '5c5a6d3a59de1be12520ec544e9f259ceef4c0981f371b363a54b4b4764ffcec198d499059e94b4ebb1bdd0293438ea6b3ea6eff6812698d9c754e98af2a946b'
+        '013bd337c6bd839cfb5a0f2a3bbfc897a4662c414e048674d6a02187acdcd7ce85b380d5209f9fd88e6a29fc198921e29aac65a858f8c5f789a1ce23d0dfe6b4'
         'dd6c431db54ed291186cbe2ede032d8839caeaef83141d4f2fc4304c8580b426937da40aa29b66d3cbb52fedbc734c0dc6c99e5b5c266badb0d78b194f73c093'
         '6c10ffec36ef7b097a4f0562cb559eaf49bbff31213181c725e6896bfb3f9112bc7a6f127a396ead99792ccd8d93019e3e4090806a417ba50d99711bb309cecb'
         '83491203f17dcf589f99b7e677e7cbeb36d5bd22e05d5bb564a254776fbcfb6020606975bd5c44cb4bc603d7a89162f7c8be2a299758b5680b73aba49f6459e0'

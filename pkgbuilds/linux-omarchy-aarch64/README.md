@@ -166,6 +166,8 @@ bin/build --arch aarch64 --package linux-omarchy-aarch64
 
 The build produces `Image`, modules and the Snapdragon laptops' device trees; N1x boots through ACPI and needs none. It installs the raw arm64 `Image` as `vmlinuz` for Limine's aarch64 Linux protocol.
 
+`1110` is Will Deacon's "tools: linux/types.h: Add 128-bit integer types for arm64 UAPI structures" (10a47fb67340, in 7.3). `linux-api-headers` 7.3 declares the arm64 `sigcontext` and `ptrace` registers as `__u128`, and the tools build's own `linux/types.h`, which 7.2.8 puts ahead of the system's, does not define it, so `resolve_btfids` stopped building in a container with those headers. It changes nothing in the kernel itself.
+
 ## Validation
 
 7.2.8-1 was built natively on the ProArt P14 (2026-10-09), and the NVIDIA open modules 615.78.08 (with our patches) and `acpi_call` compile against it.
