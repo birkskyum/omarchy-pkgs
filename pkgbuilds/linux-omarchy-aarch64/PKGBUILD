@@ -8,7 +8,7 @@
 pkgbase=linux-omarchy-aarch64
 _kernel=linux-omarchy
 pkgver=7.2.8
-pkgrel=20
+pkgrel=21
 pkgdesc='Omarchy Linux for aarch64 (BORE CPU scheduler, ADIOS I/O scheduler)'
 url='https://omarchy.org'
 arch=(
@@ -340,10 +340,9 @@ source=(
   2201-arm64-dts-qcom-x1e80100-lenovo-yoga-slim7x-Add-l7b_2p8-regulator.patch
   2202-arm64-dts-qcom-x1e80100-lenovo-yoga-slim7x-Add-ov02c10-RGB-sensor.patch
   2203-arm64-dts-qcom-x1e80100-lenovo-yoga-slim7x-enable-camera-privacy-indicator.patch
-  2204-regulator-dt-bindings-Add-regulator-off-on-delay-us-property.patch
-  2205-regulator-qcom-rpmh-Add-support-for-regulator-off-on-delay-us.patch
-  2206-arm64-dts-qcom-x1e80100-lenovo-yoga-slim7x-Keep-the-camera-rails-off-for-2.5-s.patch
   2207-arm64-dts-qcom-hamoa-Power-the-display-GDSC-while-the-camera-runs.patch
+  2208-i2c-qcom-cci-Reset-the-controller-when-it-resumes.patch
+  2209-i2c-qcom-cci-Suspend-the-controller-50-ms-after-the-last-transfer.patch
 )
 source_aarch64=(config.aarch64)
 validpgpkeys=(
@@ -786,10 +785,9 @@ sha256sums=('12e8d5a973d1ad7c5a5c69882e4022b131ed715db7003fdcd760ddf8c3e51941'
             '9ca3d621fb4da0712bc8835845ced553c46c43c47e31830c52bd0c3da4a2131b'
             '885894a3f007a6f265371e4464da3c40b41fe67ed971a8b8281feaced9ed16b2'
             'fbe7f557b091b151c9f91eb1de437068fab0901608081216d8a7c687e8101ea9'
-            '69510addd64f858f891cd52741df711200a78b1f3cf034d5fcfaac0e0db2ce29'
-            '2e55f0d2dbe53037c4994e844353df71e6f519e196dfee7da6bdd2e9d42dba66'
-            '57bf9c76fc30e576359621bec2678039d585d50030b543c769aa1ab1341791b4'
-            'bd77fa17f6c05b4d09a722529d08de90e7348522906eec8146ee225083c778c5')
+            'bd77fa17f6c05b4d09a722529d08de90e7348522906eec8146ee225083c778c5'
+            'b3b19a3205ce8e981a0e92921ff5316f51fe329f81951c700d7ac3416e63790f'
+            '5eb763f45fdef2428571d4a8988522e350c71158ef83b2f1a76d3dba9798d677')
 sha256sums_aarch64=('509f5e01b9fdf64ee35f24c95e6ba11985c9ea875147a38549f9f8adf4792e6f')
 b2sums=('5326dde778eb945f282740ef0d8765b46fbd198f1209cdfd7b91e5dac1312fc01f8bf0b2bc67b16a76de736edd8ea21b38b6c91e696ec0c4b39746cd21a15214'
         'SKIP'
@@ -1226,10 +1224,9 @@ b2sums=('5326dde778eb945f282740ef0d8765b46fbd198f1209cdfd7b91e5dac1312fc01f8bf0b
         'eb7bb50d8dbb66f61466c21abcb513ce8e9ca7cc92f528e8a6bb79378d82c77e1ce8bf5d43cce2691002f01a797b593e119808213b33fd41b89339862295c169'
         'd5c33c3913958e4a274cbf7259277139992b5223f66ce4d78f3caa01ee1268f3f4f03dda031617b46753375bd845aab9f9d6ef1579f8d3fcf8e7b27001995197'
         '6e76476209999f9bcc7d90c4124f30eea7756b9acbd919793c93198ef504d47e80b89423c0b93c9c7b6db55479e8f795593c69d540094a8b845899f7bec46411'
-        'b396f18758aad1ca298e5501910d8f445eba6588a9dad9d2b972f66001c16f3b25387a4c3a1dc3af5ec917738edb1358bbc59d441fbbc42c82bf5092fc5a06a6'
-        'dc1def9d12d1fe634e12d0a55c82be228dad9e6870f0db64207f01eb8ae2adc45b4ca9ba5ec9736fc64fb1108a38135e5169f0ec5cf8647aa05b7c2f948f3fd2'
-        '3899e6dc9fdb215359621b455d8bc7c7066c2660b089a5f4740f9861b3598166201c96a1d5c52ead5cb44c15f4694643a08c04651540ad881f79a628f55feb46'
-        '84e559dce8b21d6611619f48352bfe7b00bdb933b9b984ce2cd2724782efd7c1eae21856cf5f94d8a0ffe3ff66e4d00c2b099236527c7defbcdcf7cb4c04b7aa')
+        '84e559dce8b21d6611619f48352bfe7b00bdb933b9b984ce2cd2724782efd7c1eae21856cf5f94d8a0ffe3ff66e4d00c2b099236527c7defbcdcf7cb4c04b7aa'
+        'd26c85dd95e4474d35439684140bfa3955d6b545b910db3a1e50062a60be75bba668d91e73b5fb5e38aaac21b31715c2ffa2cc168f3b48bd9637eb381b243c77'
+        '753658af251a83196626a8767d345a43d6fbf8b93574a1fc13287bb9b173c24e805df9a6b463f52fa8c887367d52c5e572ce92381a4c3b3d44af5dcbcef6ebc3')
 b2sums_aarch64=('9ee4a04952676941a0aca4ded0cfa79f1b33e485828d620807da04a3dfd3c3fc920746182091dadb32fb6fa2f289cd939a3a35569fb4ef8f923682b421461b58')
 
 # https://www.kernel.org/pub/linux/kernel/v7.x/sha256sums.asc
