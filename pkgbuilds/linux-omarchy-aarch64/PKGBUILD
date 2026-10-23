@@ -273,6 +273,7 @@ source=(
   2208-i2c-qcom-cci-Reset-the-controller-when-it-resumes.patch
   2209-i2c-qcom-cci-Suspend-the-controller-50-ms-after-the-last-transfer.patch
   2210-arm64-dts-qcom-hamoa-glymur-Disable-the-crypto-engine.patch
+  2217-serial-qcom-geni-release-the-OPP-and-ICC-votes-in-sy.patch
 )
 source_aarch64=(config.aarch64)
 validpgpkeys=(
@@ -573,7 +574,8 @@ sha256sums=('87363c24f10e06321eb362765521094e94471f6bff8bce2d6b3e40f39f004953'
             'bd77fa17f6c05b4d09a722529d08de90e7348522906eec8146ee225083c778c5'
             'b3b19a3205ce8e981a0e92921ff5316f51fe329f81951c700d7ac3416e63790f'
             '5eb763f45fdef2428571d4a8988522e350c71158ef83b2f1a76d3dba9798d677'
-            '71bfc324bed8d2d19169f29e65bf5a29d48b67c910a161e7ffc015a76fc5fecf')
+            '71bfc324bed8d2d19169f29e65bf5a29d48b67c910a161e7ffc015a76fc5fecf'
+            '9174aec19a0421b70ccda0c8e0a95c28fb35c22fa7ba609a4ee4975183b4e32b')
 sha256sums_aarch64=('fbfcd55fcb7eaea6b6ffbf4b6368f836236f5f5203287532459e377d6e03ec26')
 b2sums=('b7fb8c74de664fdd0cd7b42afff2720bda5c4bdb2ffffa80a745c5fecd029c6fe739a3ecbdaa5c5e27194a8acb9bf861271e7bafe6eb475bb3ccd6862e4caf60'
         'SKIP'
@@ -868,7 +870,8 @@ b2sums=('b7fb8c74de664fdd0cd7b42afff2720bda5c4bdb2ffffa80a745c5fecd029c6fe739a3e
         '84e559dce8b21d6611619f48352bfe7b00bdb933b9b984ce2cd2724782efd7c1eae21856cf5f94d8a0ffe3ff66e4d00c2b099236527c7defbcdcf7cb4c04b7aa'
         'd26c85dd95e4474d35439684140bfa3955d6b545b910db3a1e50062a60be75bba668d91e73b5fb5e38aaac21b31715c2ffa2cc168f3b48bd9637eb381b243c77'
         '753658af251a83196626a8767d345a43d6fbf8b93574a1fc13287bb9b173c24e805df9a6b463f52fa8c887367d52c5e572ce92381a4c3b3d44af5dcbcef6ebc3'
-        '9586b54ca8191bdc1aa2d813d319afa613176fb87de0dc82e0772f26468df72b6396c5c9e5d00fbb8c317f0f3654ee6605d93297a1388211648ffbd429fb4522')
+        '9586b54ca8191bdc1aa2d813d319afa613176fb87de0dc82e0772f26468df72b6396c5c9e5d00fbb8c317f0f3654ee6605d93297a1388211648ffbd429fb4522'
+        'e4d0a4afc3791dd6a97804e309e90703a36e3fdc54b1e384da46e3d464b3f2c725e60a8828a182066d30d658f51dc0451b7d34c32419c54c3b940a5deae0ac88')
 b2sums_aarch64=('7688dd3a9fed8b0088ba40675a187b80e91d8099d23b17a5b6518fb9b94e99d3ede84eac5a8afed733f44191f237a07f560f2ccc80d0b82c8d24f22aa2943827')
 
 # https://www.kernel.org/pub/linux/kernel/v7.x/sha256sums.asc
