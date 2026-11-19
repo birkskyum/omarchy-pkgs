@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Birk Skyum <birk.skyum@pm.me>
+Date: Fri, 20 Nov 2026 00:40:00 +0100
+Subject: [PATCH] arm64: dts: qcom: sc8180x-microsoft-surface-pro-x: Keep the
+ firmware's screen
+
+On Omarchy's 7.3 the display clock controller sets up the PLL again
+that the firmware's picture runs on, so the screen goes black about 37
+seconds into the initramfs. The display driver could take over, but it
+brings up the Adreno 680, and the machine resets when the GPU starts.
+
+Turn off the display clock controller, the display subsystem and the
+GPU, so the firmware's framebuffer keeps the screen. An SQ1 runs this
+way with dispcc_sm8250 kept from loading, which has the same effect
+for the clock controller. The tree change has not run on the tablet.
+
+---
+ .../boot/dts/qcom/sc8180x-microsoft-surface-pro-x.dtsi | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sc8180x-microsoft-surface-pro-x.dtsi b/arch/arm64/boot/dts/qcom/sc8180x-microsoft-surface-pro-x.dtsi
+--- a/arch/arm64/boot/dts/qcom/sc8180x-microsoft-surface-pro-x.dtsi
++++ b/arch/arm64/boot/dts/qcom/sc8180x-microsoft-surface-pro-x.dtsi
+@@ -387,8 +387,15 @@
+ 	};
+ };
+ 
++/*
++ * The display clock controller sets up the PLL the firmware's picture runs
++ * on again, and the screen goes black until the display driver takes over.
++ * That driver needs the GPU, whose start resets this machine on Omarchy's
++ * kernel. So the display stack stays off and the firmware's framebuffer
++ * keeps the screen.
++ */
+ &dispcc {
+-	status = "okay";
++	status = "disabled";
+ };
+ 
+ &gcc {
+@@ -606,7 +613,7 @@
+ };
+ 
+ &gpu {
+-	status = "okay";
++	status = "disabled";
+ };
+ 
+ &gpu_zap_shader {
+@@ -614,7 +621,7 @@
+ };
+ 
+ &mdss {
+-	status = "okay";
++	status = "disabled";
+ };
+ 
+ &mdss_edp {
+-- 
+2.47.0
+
